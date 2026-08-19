@@ -17,8 +17,16 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Pooled connection (Neon's "-pooler" host) — used by the running app.
+  // Serverless functions open many short-lived connections; pooling keeps
+  // that from exhausting Postgres's connection limit.
+  url       = env("DATABASE_URL")
+  // Direct connection (no pooler) — used only by Prisma CLI commands
+  // (migrate, db push, studio). Migrations need a direct connection
+  // because pooled/transaction-mode connections don't support the
+  // session-level operations migrations rely on.
+  directUrl = env("DIRECT_URL")
 }
 
 /// Placeholder model — proves migrations run against the local database.
