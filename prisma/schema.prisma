@@ -1,0 +1,30 @@
+// HAT GAO ordering system — Prisma schema.
+//
+// This is a Phase 0 placeholder: just enough to prove the toolchain works
+// end to end (generate → migrate → connect). The real schema — menu,
+// orders, payments, deliveries, jobs, webhook_events, and everything else
+// described in Section C of docs/ARCHITECTURE.md — is built in Phase 1.
+//
+// Design rules that apply to every model added from here on (see
+// Section C.1 of the architecture doc):
+//   - money is always Int cents + a currency code, never Float
+//   - order lines snapshot prices at time of order, never reference live prices
+//   - raw provider payloads (Stripe, Wolt) are kept in Json columns
+//   - soft-delete menu items; hard-delete nothing that's ever been ordered
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Placeholder model — proves migrations run against the local database.
+/// Deleted in Phase 1 once the real schema lands.
+model HealthCheck {
+  id        String   @id @default(uuid())
+  note      String   @default("phase-0 scaffold")
+  createdAt DateTime @default(now())
+}
