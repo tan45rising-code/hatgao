@@ -37,15 +37,23 @@ npm install
 # 2. Provision the local database (idempotent, safe to re-run)
 ./scripts/dev-db-setup.sh
 
-# 3. Copy the env template and fill in what you have
-cp .env.example .env.local
+# 3. Copy the env template and fill in what you have.
+#    Use .env, NOT .env.local — the Prisma CLI only reads .env.
+cp .env.example .env
 
-# 4. Push the (currently placeholder) schema and generate the client
-npm run prisma:migrate
+# 4. Create the tables in your database
+npx prisma db push
 
-# 5. Run the dev server
+# 5. Load the menu (optional; needs psql installed)
+npm run db:seed
+
+# 6. Run the dev server
 npm run dev
 ```
+
+`prisma db push` is the quickest way to get a database in sync while the
+schema is still moving. Before go-live we switch to proper versioned
+migrations (`prisma migrate`), which keep a replayable history.
 
 Visit http://localhost:3000.
 

@@ -15,7 +15,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "db:seed": "tsx prisma/seed.ts",
+    "db:seed": "psql \"$DIRECT_URL\" -v ON_ERROR_STOP=1 -f prisma/verify/002_seed_menu.sql",
     "postinstall": "prisma generate",
     "prepare": "husky",
     "test:domain": "tsx tests/unit/domain.test.ts",
