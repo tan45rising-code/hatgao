@@ -39,11 +39,35 @@ a Neon Postgres database. Verified working.
 - Full Prisma schema (`prisma/schema.prisma`) — menu, orders, payments,
   deliveries, jobs, webhook inbox, promotions, audit log
 - Real Hat Gao menu seeded: 74 products across 12 categories
-- Domain logic in `src/server` and `src/lib`, with 60 passing tests
+- Domain logic in `src/server` and `src/lib`, with 86 passing tests
   (`npm run test:domain`)
+- **Admin dashboard is done**, built as three reviewable slices on the
+  `admin-dashboard` branch (not yet merged to `main` — merge when you're
+  ready to treat it as reviewed):
+  - **Staff auth core** — password login (`argon2id`), roles (`OWNER`/
+    `STAFF` with a hierarchy check), 5-attempts/15-minute lockout, full
+    audit trail. `npm run staff:create` creates accounts from the CLI —
+    there's no in-UI account creation yet.
+  - **2FA** — mandatory TOTP for `OWNER` accounts, enforced by
+    `src/middleware.ts` redirecting an unenrolled OWNER to
+    `/admin/2fa/setup` before anything else. 10 one-time recovery codes
+    (argon2id-hashed, never stored plaintext) shown once at enrollment.
+    **Your own OWNER account is not currently enrolled** — I reset it to
+    unenrolled after every test pass. Enroll it for real before relying
+    on this in production.
+  - **Menu CRUD** — categories, products, modifier groups, all OWNER-only
+    (`ROUTE_ROLE_REQUIREMENTS` in `src/middleware.ts`). Product
+    availability is a 3-state dropdown (Available / Sold out today /
+    Unavailable) — "sold out today" self-heals at next local midnight via
+    a lazy sync (`src/server/menu/sync-availability.ts`), no cron needed.
+    Real photo upload to Vercel Blob with `sharp` re-encoding as
+    validation (`src/server/menu/product-image.ts`) — requires
+    `BLOB_READ_WRITE_TOKEN` in `.env` (documented in `.env.example`).
 
-**Not done yet:** the admin dashboard (staff auth, menu CRUD, availability
-toggles). That is the next task.
+**Not done yet:** merging `admin-dashboard` into `main`; enrolling the
+real OWNER account in 2FA; whatever Phase 1 task comes after the admin
+dashboard (check `docs/ARCHITECTURE.md`'s roadmap — likely the customer-
+facing ordering flow and/or the order/payment/delivery state machines).
 
 ## Hard-won gotchas — do not rediscover these
 
