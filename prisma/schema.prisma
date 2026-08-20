@@ -1,16 +1,31 @@
-// HAT GAO ordering system — Prisma schema.
+// ============================================================================
+// HAT GAO ordering system — database schema
+// ============================================================================
 //
-// This is a Phase 0 placeholder: just enough to prove the toolchain works
-// end to end (generate → migrate → connect). The real schema — menu,
-// orders, payments, deliveries, jobs, webhook_events, and everything else
-// described in Section C of docs/ARCHITECTURE.md — is built in Phase 1.
+// Design rules (see docs/ARCHITECTURE.md Section C.1):
 //
-// Design rules that apply to every model added from here on (see
-// Section C.1 of the architecture doc):
-//   - money is always Int cents + a currency code, never Float
-//   - order lines snapshot prices at time of order, never reference live prices
-//   - raw provider payloads (Stripe, Wolt) are kept in Json columns
-//   - soft-delete menu items; hard-delete nothing that's ever been ordered
+//   1. MONEY IS ALWAYS Int CENTS. Never Float, never Decimal-as-float.
+//      €8.50 is stored as 850. A rounding error here is a financial bug.
+//
+//   2. VAT IS STORED IN BASIS POINTS (Int). 5% = 500, 9% = 900, 19% = 1900.
+//      Same reasoning — no floating point anywhere near tax.
+//
+//   3. ORDER LINES SNAPSHOT EVERYTHING. Name, price, VAT rate are copied
+//      onto the order at the time it's placed. Changing a menu price
+//      tomorrow must never alter what last week's order says.
+//
+//   4. RAW PROVIDER PAYLOADS ARE KEPT. Every Stripe and Wolt response goes
+//      into a Json column. When something breaks at 21:00 on a Saturday,
+//      the raw payload is the difference between 5 minutes and an hour.
+//
+//   5. SOFT-DELETE ANYTHING ORDERABLE. deletedAt, never an actual DELETE.
+//      Order history references these rows forever.
+//
+//   6. CONSTRAINTS OVER CONVENTIONS. Duplicate payments, duplicate
+//      deliveries and double-redeemed coupons are prevented by UNIQUE
+//      indexes in the database, not by application checks that lose races.
+//
+// ============================================================================
 
 generator client {
   provider = "prisma-client-js"
@@ -18,21 +33,870 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  // Pooled connection (Neon's "-pooler" host) — used by the running app.
-  // Serverless functions open many short-lived connections; pooling keeps
-  // that from exhausting Postgres's connection limit.
   url       = env("DATABASE_URL")
-  // Direct connection (no pooler) — used only by Prisma CLI commands
-  // (migrate, db push, studio). Migrations need a direct connection
-  // because pooled/transaction-mode connections don't support the
-  // session-level operations migrations rely on.
   directUrl = env("DIRECT_URL")
 }
 
-/// Placeholder model — proves migrations run against the local database.
-/// Deleted in Phase 1 once the real schema lands.
-model HealthCheck {
-  id        String   @id @default(uuid())
-  note      String   @default("phase-0 scaffold")
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum FulfilmentType {
+  DELIVERY
+  PICKUP
+}
+
+/// The restaurant's fulfilment of food. Deliberately knows nothing about
+/// card networks or couriers — see PaymentStatus and DeliveryStatus.
+enum OrderStatus {
+  DRAFT // cart exists, nothing committed
+  PENDING_PAYMENT // checkout started, awaiting authorization
+  PLACED // payment AUTHORIZED — only ever set by a verified Stripe webhook
+  ACCEPTED // staff accepted; delivery creation + capture triggered
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  AWAITING_PICKUP
+  COMPLETED
+  REJECTED // staff rejected — authorization is voided
+  CANCELLED
+  ABANDONED // never paid
+  FAILED // unrecoverable; alerts staff
+}
+
+/// Money, and only money. Every transition originates from a
+/// signature-verified Stripe webhook, never from our own call's return value.
+enum PaymentStatus {
+  REQUIRES_PAYMENT
+  PROCESSING // customer is in 3DS / bank confirmation
+  AUTHORIZED // funds held, NOT taken
+  CAPTURED // money is ours
+  CAPTURE_FAILED // rare; order proceeds, staff alerted, chased separately
+  PARTIALLY_REFUNDED
+  REFUNDED
+  VOIDED // hold released — the state that makes the design safe
+  FAILED
+}
+
+/// Driven almost entirely by Wolt webhooks. NOT_REQUIRED for pickup orders.
+enum DeliveryStatus {
+  NOT_REQUIRED
+  QUOTED
+  CREATION_PENDING
+  CREATION_FAILED
+  CREATED
+  PICKUP_STARTED
+  PICKED_UP
+  DROPOFF_STARTED
+  DELIVERED
+  CANCELLED
+  REJECTED
+  CUSTOMER_NO_SHOW
+}
+
+/// Split deliberately: a kitchen tablet left unlocked must not be able to
+/// change prices or issue refunds. See docs/ARCHITECTURE.md H.3.
+enum StaffRole {
+  OWNER // menu, pricing, promotions, settings, analytics, refunds
+  STAFF // see and progress orders only
+}
+
+/// The 14 allergens requiring declaration under EU Regulation 1169/2011.
+enum Allergen {
+  CEREALS_CONTAINING_GLUTEN
+  CRUSTACEANS
+  EGGS
+  FISH
+  PEANUTS
+  SOYBEANS
+  MILK
+  NUTS
+  CELERY
+  MUSTARD
+  SESAME_SEEDS
+  SULPHITES
+  LUPIN
+  MOLLUSCS
+}
+
+enum AllergenPresence {
+  CONTAINS
+  MAY_CONTAIN // cross-contamination risk (shared fryer, shared wok)
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE_DELIVERY
+}
+
+enum PromotionScope {
+  DELIVERY_ONLY
+  PICKUP_ONLY
+  BOTH
+}
+
+/// Configurable delivery pricing. Never hardcode these — Wolt can change
+/// your costs on 15 days' notice (contract §3.2).
+enum DeliveryPricingRuleType {
+  FLAT_FEE // customer always pays X
+  PASS_THROUGH // customer pays exactly Wolt's cost
+  CAPPED_PASS_THROUGH // customer pays Wolt's cost, capped at X
+  FREE_ABOVE_THRESHOLD // order >= X → free delivery
+  TIERED_BY_ORDER_VALUE // bands of order value → fee
+  DISTANCE_GUARD // refuse if Wolt's cost exceeds X
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  DEAD // exhausted retries; alerts staff
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+  DUPLICATE
+}
+
+enum ActorType {
+  CUSTOMER
+  STAFF
+  SYSTEM
+  STRIPE
+  WOLT
+}
+
+// ============================================================================
+// RESTAURANT CONFIGURATION
+// ============================================================================
+
+/// Single-row table. Everything the restaurant can tune without a deploy.
+model Settings {
+  id String @id @default("singleton")
+
+  restaurantName String @default("Hat Gao")
+  addressLine    String @default("58 Vasiliou Voulgaroktonou")
+  city           String @default("Nicosia")
+  postcode       String @default("1010")
+  country        String @default("CY")
+  latitude       Float?
+  longitude      Float?
+  phone          String @default("+35722002235")
+  email          String @default("hatgao.restaurant@gmail.com")
+
+  timezone String @default("Asia/Nicosia")
+  currency String @default("EUR")
+
+  /// Kill switches. deliveryEnabled is the one-button "stop offering
+  /// delivery right now" control — Wolt gives no uptime guarantee
+  /// (contract §5.1), so we need to stop taking orders we can't fulfil.
+  deliveryEnabled Boolean @default(true)
+  pickupEnabled   Boolean @default(true)
+
+  minOrderDeliveryCents Int @default(1500) // €15.00
+  minOrderPickupCents   Int @default(0)
+
+  /// Prep time drives the pickup estimate we send Wolt, which is what the
+  /// Venue Lateness Fee (§2.14) is measured against. Round UP: quoting 30
+  /// and being ready in 25 costs nothing; quoting 25 and taking 30 costs
+  /// €1.00 + €0.10/min AND leaves a courier waiting in your doorway.
+  defaultPrepMinutes Int @default(25)
+  peakPrepMinutes    Int @default(35)
+
+  /// Escalation: how long before an unacknowledged order starts shouting.
+  orderAckTimeoutMinutes    Int @default(5)
+  orderAckEscalationMinutes Int @default(10)
+
+  /// Wolt Drive fee constants, from the signed Agreement (Option A).
+  /// Editable because Wolt may change them on 15 days' notice (§3.2).
+  woltBaseFeeCents        Int @default(350) // €3.50
+  woltBaseDistanceMetres  Int @default(1000)
+  woltIncrementFeeCents   Int @default(50) // €0.50
+  woltIncrementMetres     Int @default(1000)
+  woltMaxDistanceMetres   Int @default(10000)
+  /// Non-secret Wolt identifiers. Tokens/secrets live in env vars only.
+  woltMerchantId          String?
+  woltVenueId             String?
+
+  /// Above this many items, warn staff at acceptance — an order that
+  /// doesn't fit one standard car triggers a €3.00 Extra Courier Fee (§2.15).
+  largeOrderItemThreshold Int @default(15)
+
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+/// Regular weekly hours. Times are minutes since midnight in the
+/// restaurant's timezone (720 = 12:00, 1350 = 22:30). Integers compare
+/// cleanly and dodge every timezone/DST trap that string times invite.
+model OpeningHours {
+  id        String  @id @default(uuid())
+  dayOfWeek Int // 0 = Sunday ... 6 = Saturday
+  opensAt   Int // minutes since midnight
+  closesAt  Int
+  isClosed  Boolean @default(false)
+
+  @@unique([dayOfWeek])
+  @@map("opening_hours")
+}
+
+/// One-off overrides: public holidays, private events, emergency closures.
+model ServiceException {
+  id       String   @id @default(uuid())
+  date     DateTime @db.Date
+  isClosed Boolean  @default(true)
+  opensAt  Int?
+  closesAt Int?
+  note     String?
+
+  @@unique([date])
+  @@map("service_exceptions")
+}
+
+// ============================================================================
+// MENU
+// ============================================================================
+
+model Category {
+  id          String  @id @default(uuid())
+  name        String
+  slug        String  @unique
+  description String?
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([sortOrder])
+  @@map("categories")
+}
+
+model Product {
+  id         String @id @default(uuid())
+  categoryId String
+
+  /// Hat Gao's printed menu is numbered and customers order by number
+  /// ("number 26, please"). Keeping it is worth more than it looks:
+  /// it makes the kitchen ticket and the phone conversation match.
+  menuNumber Int?
+
+  name        String
+  slug        String  @unique
+  description String?
+
+  priceCents Int
+  /// 500 = 5% (food), 900 = 9% (soft drinks), 1900 = 19% (alcohol).
+  vatRateBps Int @default(500)
+
+  imageUrl String?
+  imageAlt String?
+
+  /// 86'd right now — hidden from customers, one tap to restore.
+  isAvailable Boolean @default(true)
+  /// Off-menu entirely, but preserved for order history.
+  isActive    Boolean @default(true)
+
+  /// Beer cannot be delivered by Wolt Drive: the Agreement (§2.2–2.3)
+  /// prohibits products requiring age verification. Enforced at cart
+  /// AND at checkout, not just hidden in the UI.
+  deliveryEligible Boolean @default(true)
+  pickupEligible   Boolean @default(true)
+  containsAlcohol  Boolean @default(false)
+
+  /// Allergen data does NOT publish until a human has confirmed it.
+  /// Inferred-but-unverified allergens are a health and legal risk.
+  allergensVerified   Boolean   @default(false)
+  allergensVerifiedAt DateTime?
+  allergensVerifiedBy String?
+
+  /// Some dishes genuinely take longer; feeds the prep-time estimate.
+  prepMinutesOverride Int?
+
+  sortOrder Int @default(0)
+
+  category       Category                @relation(fields: [categoryId], references: [id])
+  allergens      ProductAllergen[]
+  modifierGroups ProductModifierGroup[]
+  orderItems     OrderItem[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([categoryId, sortOrder])
+  @@index([menuNumber])
+  @@map("products")
+}
+
+model ProductAllergen {
+  id        String           @id @default(uuid())
+  productId String
+  allergen  Allergen
+  presence  AllergenPresence @default(CONTAINS)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, allergen])
+  @@map("product_allergens")
+}
+
+/// A reusable set of choices — "Choose your filling", "Rice type", "Size".
+/// Shared across products via the join table, because the same spice-level
+/// or protein choice applies to many dishes.
+model ModifierGroup {
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+
+  /// minSelect=1, maxSelect=1, isRequired=true  → "choose exactly one"
+  /// minSelect=0, maxSelect=3, isRequired=false → "up to three extras"
+  minSelect  Int     @default(1)
+  maxSelect  Int     @default(1)
+  isRequired Boolean @default(true)
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  modifiers Modifier[]
+  products  ProductModifierGroup[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("modifier_groups")
+}
+
+model Modifier {
+  id      String @id @default(uuid())
+  groupId String
+
+  name String
+  /// Can be 0 (a free choice) or negative (a discount for going without).
+  priceDeltaCents Int @default(0)
+
+  isAvailable Boolean @default(true)
+  isDefault   Boolean @default(false)
+  sortOrder   Int     @default(0)
+
+  group              ModifierGroup       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  allergens          ModifierAllergen[]
+  orderItemModifiers OrderItemModifier[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([groupId, sortOrder])
+  @@map("modifiers")
+}
+
+/// Choosing "shrimp" instead of "chicken" changes the allergen profile of
+/// the dish. Modelling this on the modifier — not just the product — is
+/// what makes the customer-facing allergen display actually correct.
+model ModifierAllergen {
+  id         String           @id @default(uuid())
+  modifierId String
+  allergen   Allergen
+  presence   AllergenPresence @default(CONTAINS)
+
+  modifier Modifier @relation(fields: [modifierId], references: [id], onDelete: Cascade)
+
+  @@unique([modifierId, allergen])
+  @@map("modifier_allergens")
+}
+
+model ProductModifierGroup {
+  id        String @id @default(uuid())
+  productId String
+  groupId   String
+  sortOrder Int    @default(0)
+
+  product Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  group   ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, groupId])
+  @@map("product_modifier_groups")
+}
+
+// ============================================================================
+// PEOPLE
+// ============================================================================
+
+model StaffUser {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         StaffRole @default(STAFF)
+  isActive     Boolean   @default(true)
+
+  /// TOTP secret, required for OWNER. Not for the kitchen tablet —
+  /// that would be operationally unworkable, which is exactly why the
+  /// roles are split.
+  twoFactorSecret  String?
+  twoFactorEnabled Boolean @default(false)
+
+  lastLoginAt      DateTime?
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("staff_users")
+}
+
+/// Optional. Guest checkout is the default in V1 — accounts arrive in
+/// Phase 8. A guest order simply has customerId = null.
+model Customer {
+  id    String  @id @default(uuid())
+  email String? @unique
+  phone String?
+  name  String?
+
+  /// GDPR: consent must be explicit, separately recorded, and timestamped.
+  /// An improperly consented marketing list is a liability, not an asset.
+  marketingConsentAt DateTime?
+
+  addresses Address[]
+  orders    Order[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([phone])
+  @@map("customers")
+}
+
+model Address {
+  id         String  @id @default(uuid())
+  customerId String
+  label      String?
+
+  line1        String
+  line2        String?
+  city         String
+  postcode     String?
+  latitude     Float?
+  longitude    Float?
+  instructions String?
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("addresses")
+}
+
+// ============================================================================
+// ORDERS
+// ============================================================================
+
+model Order {
+  id String @id @default(uuid())
+
+  /// Short human code staff read aloud: "HG-4821".
+  orderNumber String @unique
+  /// Unguessable token for the customer's status page. NEVER expose a
+  /// sequential id in a URL — otherwise anyone can walk /orders/1001,
+  /// /orders/1002 and read customers' names, phones and home addresses.
+  publicToken String @unique
+
+  status         OrderStatus    @default(DRAFT)
+  fulfilmentType FulfilmentType
+
+  customerId String?
+  /// Snapshotted, because a customer may edit their profile later and
+  /// the order must still say who it was actually for.
+  customerName  String
+  customerPhone String
+  customerEmail String?
+
+  deliveryLine1        String?
+  deliveryLine2        String?
+  deliveryCity         String?
+  deliveryPostcode     String?
+  deliveryLatitude     Float?
+  deliveryLongitude    Float?
+  deliveryInstructions String?
+
+  /// All money in cents. subsidyCents = woltCostCents - customerDeliveryFeeCents,
+  /// stored explicitly so analytics can answer the only question that
+  /// matters: is a direct order actually more profitable than a
+  /// marketplace order?
+  subtotalCents             Int    @default(0)
+  discountCents             Int    @default(0)
+  customerDeliveryFeeCents  Int    @default(0)
+  woltCostCents             Int    @default(0)
+  subsidyCents              Int    @default(0)
+  vatTotalCents             Int    @default(0)
+  totalCents                Int    @default(0)
+  currency                  String @default("EUR")
+
+  notes           String?
+  rejectionReason String?
+
+  promisedPrepMinutes Int?
+  promisedReadyAt     DateTime?
+  acceptedAt          DateTime?
+  readyAt             DateTime?
+  completedAt         DateTime?
+  /// Pre-orders (Phase 10). Null = ASAP.
+  scheduledFor        DateTime?
+
+  /// Optimistic lock: two staff on two tablets cannot both accept.
+  version Int @default(0)
+
+  customer    Customer?             @relation(fields: [customerId], references: [id])
+  items       OrderItem[]
+  events      OrderEvent[]
+  payment     Payment?
+  delivery    Delivery?
+  redemptions PromotionRedemption[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String
+
+  /// Nullable: the product may be soft-deleted years later. The snapshot
+  /// fields below are the source of truth for what was actually sold.
+  productId String?
+
+  menuNumber     Int?
+  nameSnapshot   String
+  unitPriceCents Int
+  quantity       Int    @default(1)
+  lineTotalCents Int
+  vatRateBps     Int
+  notes          String?
+
+  order     Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product?            @relation(fields: [productId], references: [id])
+  modifiers OrderItemModifier[]
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model OrderItemModifier {
+  id          String  @id @default(uuid())
+  orderItemId String
+  modifierId  String?
+
+  nameSnapshot    String
+  priceDeltaCents Int
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  modifier  Modifier? @relation(fields: [modifierId], references: [id])
+
+  @@index([orderItemId])
+  @@map("order_item_modifiers")
+}
+
+/// Full audit trail of every state transition: who, what, when, why.
+model OrderEvent {
+  id      String @id @default(uuid())
+  orderId String
+
+  fromStatus OrderStatus?
+  toStatus   OrderStatus
+  actorType  ActorType
+  actorId    String?
+  reason     String?
+  metadata   Json?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId, createdAt])
+  @@map("order_events")
+}
+
+// ============================================================================
+// PAYMENTS
+// ============================================================================
+
+model Payment {
+  id      String @id @default(uuid())
+  /// UNIQUE — this constraint is the protection against duplicate payments.
+  orderId String @unique
+
+  provider                String        @default("stripe")
+  providerPaymentIntentId String?       @unique
+  status                  PaymentStatus @default(REQUIRES_PAYMENT)
+
+  amountAuthorizedCents Int    @default(0)
+  amountCapturedCents   Int    @default(0)
+  amountRefundedCents   Int    @default(0)
+  currency              String @default("EUR")
+
+  /// Sent to Stripe so a double-clicked "Pay" button cannot create two
+  /// PaymentIntents.
+  idempotencyKey String? @unique
+
+  authorizedAt DateTime?
+  capturedAt   DateTime?
+  voidedAt     DateTime?
+  failureCode  String?
+  failureMessage String?
+
+  raw Json?
+
+  order  Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  events PaymentEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("payments")
+}
+
+model PaymentEvent {
+  id        String @id @default(uuid())
+  paymentId String
+
+  type          String
+  fromStatus    PaymentStatus?
+  toStatus      PaymentStatus?
+  raw           Json?
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([paymentId, createdAt])
+  @@map("payment_events")
+}
+
+// ============================================================================
+// DELIVERY
+// ============================================================================
+
+model Delivery {
+  id      String @id @default(uuid())
+  /// UNIQUE — physically prevents creating two Wolt deliveries for one
+  /// order. Wolt's DUPLICATE_ORDER error is the second line of defence.
+  orderId String @unique
+
+  provider String         @default("wolt")
+  status   DeliveryStatus @default(QUOTED)
+
+  /// Wolt's own docs warn events "may be sent at seemingly random order".
+  /// We only advance state when the incoming event outranks the current
+  /// one, so a late PICKUP_STARTED can't drag a delivery back from
+  /// DELIVERED. See docs/ARCHITECTURE.md Section F.
+  statusRank Int @default(0)
+
+  shipmentPromiseId String?
+  promiseValidUntil DateTime?
+  quotedPriceCents  Int?
+  isBinding         Boolean?
+
+  woltOrderReferenceId String? @unique
+  woltDeliveryId       String?
+  trackingUrl          String?
+
+  pickupEta      DateTime?
+  dropoffEta     DateTime?
+  distanceMetres Int?
+
+  attemptCount  Int       @default(0)
+  lastErrorCode String?
+  lastErrorAt   DateTime?
+
+  raw Json?
+
+  order  Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  events DeliveryEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("deliveries")
+}
+
+model DeliveryEvent {
+  id         String @id @default(uuid())
+  deliveryId String
+
+  type         String
+  dispatchedAt DateTime?
+  receivedAt   DateTime  @default(now())
+  raw          Json?
+
+  delivery Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@index([deliveryId, receivedAt])
+  @@map("delivery_events")
+}
+
+// ============================================================================
+// INFRASTRUCTURE — inbox, outbox, audit
+// ============================================================================
+
+/// The inbox pattern. Every webhook is STORED FIRST, PROCESSED SECOND.
+/// The unique index on providerEventId is the idempotency guarantee:
+/// a redelivered event is recognised and discarded, not applied twice.
+model WebhookEvent {
+  id              String @id @default(uuid())
+  provider        String // "stripe" | "wolt"
+  providerEventId String
+  eventType       String
+
+  payload      Json
+  dispatchedAt DateTime?
+  receivedAt   DateTime      @default(now())
+  processedAt  DateTime?
+  status       WebhookStatus @default(RECEIVED)
+  error        String?
+  attempts     Int           @default(0)
+
+  @@unique([provider, providerEventId])
+  @@index([status, receivedAt])
+  @@map("webhook_events")
+}
+
+/// The outbox pattern. Claimed with SELECT ... FOR UPDATE SKIP LOCKED so
+/// concurrent workers never grab the same job. Deliberately boring:
+/// a Postgres table beats standing up Redis for this volume.
+model Job {
+  id      String @id @default(uuid())
+  type    String
+  payload Json
+
+  runAfter    DateTime  @default(now())
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  status      JobStatus @default(PENDING)
+  lastError   String?
+  lockedAt    DateTime?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([status, runAfter])
+  @@map("jobs")
+}
+
+model AuditLog {
+  id String @id @default(uuid())
+
+  actorType  ActorType
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+
+  before Json?
+  after  Json?
+
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_log")
+}
+
+// ============================================================================
+// PROMOTIONS & DELIVERY PRICING
+// ============================================================================
+
+model Promotion {
+  id   String @id @default(uuid())
+  code String @unique
+  name String
+
+  discountType     DiscountType
+  /// Percentage → basis points (1000 = 10%). Fixed → cents.
+  discountValue    Int
+  maxDiscountCents Int?
+  minOrderCents    Int          @default(0)
+
+  scope           PromotionScope @default(BOTH)
+  firstOrderOnly  Boolean        @default(false)
+  usageLimit      Int?
+  usageCount      Int            @default(0)
+  perCustomerLimit Int?
+
+  validFrom DateTime?
+  validTo   DateTime?
+  isActive  Boolean   @default(true)
+
+  redemptions PromotionRedemption[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("promotions")
+}
+
+/// The unique constraint below is what stops a single-use code being
+/// redeemed twice by two simultaneous requests. An application-level
+/// "has this been used?" check loses that race; a database constraint
+/// does not.
+model PromotionRedemption {
+  id          String  @id @default(uuid())
+  promotionId String
+  orderId     String
+  customerId  String?
+
+  discountCents Int
+
+  promotion Promotion @relation(fields: [promotionId], references: [id])
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([promotionId, orderId])
+  @@map("promotion_redemptions")
+}
+
+/// Ordered, configurable rules turning Wolt's cost into the fee the
+/// customer sees. Versioned by validFrom/validTo so an old order's
+/// pricing can always be explained.
+model DeliveryPricingRule {
+  id       String                  @id @default(uuid())
+  priority Int                     @default(0)
+  ruleType DeliveryPricingRuleType
+  config   Json
+
+  isActive  Boolean   @default(true)
+  validFrom DateTime?
+  validTo   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, priority])
+  @@map("delivery_pricing_rules")
 }
