@@ -19,7 +19,8 @@
     "postinstall": "prisma generate",
     "prepare": "husky",
     "test:domain": "tsx tests/unit/domain.test.ts",
-    "typecheck:domain": "tsc --noEmit -p tsconfig.domain.json"
+    "typecheck:domain": "tsc --noEmit -p tsconfig.domain.json",
+    "db:constraints": "psql \"$DIRECT_URL\" -v ON_ERROR_STOP=1 -f prisma/verify/004_constraints.sql"
   },
   "dependencies": {
     "next": "^15.0.0",
