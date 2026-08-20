@@ -300,8 +300,15 @@ model Product {
   imageUrl String?
   imageAlt String?
 
-  /// 86'd right now — hidden from customers, one tap to restore.
+  /// Sold out right now — hidden from customers.
   isAvailable Boolean @default(true)
+  /// Set alongside `isAvailable = false` when staff pick "Sold out for
+  /// today" rather than "Unavailable" indefinitely. Once this passes,
+  /// `isAvailable` flips back to true automatically (see
+  /// `syncExpiredAvailability`, src/server/menu/availability.ts) — no
+  /// scheduler needed, it's checked lazily whenever the product list is
+  /// read. Null for both "Available" and indefinite "Unavailable".
+  availableAgainAt DateTime?
   /// Off-menu entirely, but preserved for order history.
   isActive    Boolean @default(true)
 
@@ -445,6 +452,12 @@ model StaffUser {
   /// roles are split.
   twoFactorSecret  String?
   twoFactorEnabled Boolean @default(false)
+
+  /// argon2id hashes of one-time recovery codes, never the plaintext.
+  /// Consuming one removes its hash from the array — single use each.
+  /// Generated at enrollment; the only way back in if the authenticator
+  /// device is lost.
+  twoFactorRecoveryCodeHashes String[] @default([])
 
   lastLoginAt      DateTime?
   failedLoginCount Int       @default(0)
