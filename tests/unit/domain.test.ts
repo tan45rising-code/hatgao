@@ -54,22 +54,66 @@ import {
   getAvailability,
   suggestedPrepMinutes,
   toLocalMoment,
+  nextLocalMidnightUtc,
   DEFAULT_PEAK_WINDOWS,
   type AvailabilityConfig,
   type OpeningHoursRow,
   type DayOfWeek,
 } from "../../src/server/menu/availability.ts";
 
+import {
+  isLocked,
+  recordFailedAttempt,
+  recordSuccessfulAttempt,
+  MAX_FAILED_ATTEMPTS,
+  LOCKOUT_DURATION_MINUTES,
+} from "../../src/server/auth/lockout.ts";
+
+import { canAccess } from "../../src/server/auth/session.ts";
+
+import { hashPassword, verifyPassword } from "../../src/server/auth/password.ts";
+
+import { generateTotpSecret, buildOtpAuthUri, verifyTotpCode } from "../../src/server/auth/totp.ts";
+
+import {
+  generateRecoveryCodes,
+  hashRecoveryCodes,
+  verifyRecoveryCode,
+} from "../../src/server/auth/recovery-codes.ts";
+
+import { slugify } from "../../src/lib/slug.ts";
+
 // ---------------------------------------------------------------- harness --
 let passed = 0;
 const failures: string[] = [];
 
-function test(name: string, fn: () => void) {
+// async-aware, but NOT declared `async` itself: an `async function` defers
+// even a synchronous body's `passed++` into a microtask (an `await` yields
+// even on a non-promise value), which would desync the counters from the
+// synchronous `process.exit()` at the bottom of this file for the 60+
+// existing sync callers that don't `await test(...)`. So a sync `fn` is run
+// and counted entirely synchronously, exactly as before; only a genuinely
+// async `fn` (the password-hashing round-trip below) returns a promise the
+// caller must `await`.
+// tsx runs this file as CJS (no top-level await), so an async test's
+// promise is stashed here and awaited by the final report block instead of
+// awaited at each call site.
+const pending: Promise<void>[] = [];
+
+function test(name: string, fn: () => void | Promise<void>): void {
+  const record = (err?: unknown) => {
+    if (err === undefined) passed++;
+    else failures.push(`${name}\n      ${(err as Error).message.split("\n")[0]}`);
+  };
   try {
-    fn();
-    passed++;
+    const result = fn();
+    if (result && typeof (result as Promise<void>).then === "function") {
+      pending.push((result as Promise<void>).then(() => record(), record));
+      return;
+    }
+    record();
   } catch (err) {
-    failures.push(`${name}\n      ${(err as Error).message.split("\n")[0]}`);
+    record(err);
   }
 }
 
@@ -693,14 +737,221 @@ test("winter time is handled (UTC+2, not +3)", () => {
   assert.equal(m.minutesSinceMidnight, 19 * 60, "January must be UTC+2");
 });
 
-// ------------------------------------------------------------------ report --
-console.log("\n" + "=".repeat(66));
-if (failures.length === 0) {
-  console.log(`  ALL ${passed} TESTS PASSED`);
-} else {
-  console.log(`  ${passed} passed, ${failures.length} FAILED\n`);
-  for (const f of failures) console.log(`  ✗ ${f}`);
-}
-console.log("=".repeat(66) + "\n");
+test("next local midnight — summer (UTC+3)", () => {
+  const now = new Date("2026-08-20T19:00:00Z"); // 22:00 Nicosia local
+  const next = nextLocalMidnightUtc(now, "Asia/Nicosia");
+  assert.equal(next.toISOString(), "2026-08-20T21:00:00.000Z"); // 00:00 Aug 21 local
+});
 
-process.exit(failures.length === 0 ? 0 : 1);
+test("next local midnight — winter (UTC+2)", () => {
+  const now = new Date("2026-01-15T17:00:00Z"); // 19:00 Nicosia local
+  const next = nextLocalMidnightUtc(now, "Asia/Nicosia");
+  assert.equal(next.toISOString(), "2026-01-15T22:00:00.000Z"); // 00:00 Jan 16 local
+});
+
+test("next local midnight rolls forward, not backward, right after midnight", () => {
+  const now = new Date("2026-08-20T21:01:00Z"); // 00:01 Aug 21 local
+  const next = nextLocalMidnightUtc(now, "Asia/Nicosia");
+  assert.equal(next.toISOString(), "2026-08-21T21:00:00.000Z"); // 00:00 Aug 22, not Aug 21
+});
+
+// -------------------------------------------------------- lockout policy --
+section("Staff login lockout policy");
+
+test("no lock until the threshold is reached", () => {
+  const now = new Date("2026-08-20T12:00:00Z");
+  let state = { failedLoginCount: 0, lockedUntil: null as Date | null };
+  for (let i = 1; i < MAX_FAILED_ATTEMPTS; i++) {
+    state = recordFailedAttempt(state, now);
+    assert.equal(state.failedLoginCount, i);
+    assert.equal(state.lockedUntil, null, `attempt ${i} should not lock yet`);
+    assert.equal(isLocked(now, state.lockedUntil), false);
+  }
+});
+
+test("the threshold attempt locks the account for the configured duration", () => {
+  const now = new Date("2026-08-20T12:00:00Z");
+  let state = { failedLoginCount: 0, lockedUntil: null as Date | null };
+  for (let i = 0; i < MAX_FAILED_ATTEMPTS; i++) {
+    state = recordFailedAttempt(state, now);
+  }
+  assert.equal(state.failedLoginCount, MAX_FAILED_ATTEMPTS);
+  assert.ok(state.lockedUntil, "should be locked at the threshold");
+  assert.ok(isLocked(now, state.lockedUntil));
+  assert.equal(
+    state.lockedUntil!.getTime() - now.getTime(),
+    LOCKOUT_DURATION_MINUTES * 60_000,
+  );
+});
+
+test("isLocked releases once lockedUntil is in the past", () => {
+  const lockedUntil = new Date("2026-08-20T12:00:00Z");
+  assert.equal(isLocked(new Date("2026-08-20T11:59:59Z"), lockedUntil), true);
+  assert.equal(isLocked(new Date("2026-08-20T12:00:01Z"), lockedUntil), false);
+});
+
+test("a correct password clears the streak, even mid-lockout", () => {
+  const state = recordSuccessfulAttempt();
+  assert.equal(state.failedLoginCount, 0);
+  assert.equal(state.lockedUntil, null);
+});
+
+// ------------------------------------------------------ role-based access --
+section("Role-based access control");
+
+test("OWNER satisfies both role requirements", () => {
+  assert.equal(canAccess("OWNER", "STAFF"), true);
+  assert.equal(canAccess("OWNER", "OWNER"), true);
+});
+
+test("STAFF satisfies STAFF-level requirements but not OWNER-level ones", () => {
+  assert.equal(canAccess("STAFF", "STAFF"), true);
+  assert.equal(canAccess("STAFF", "OWNER"), false);
+});
+
+// ------------------------------------------------------- password hashing --
+section("Password hashing (argon2id)");
+
+test("a password round-trips through hash and verify", async () => {
+  const hash = await hashPassword("correct horse battery staple");
+  assert.match(hash, /^\$argon2id\$/);
+  assert.equal(await verifyPassword(hash, "correct horse battery staple"), true);
+});
+
+test("the wrong password is rejected", async () => {
+  const hash = await hashPassword("correct horse battery staple");
+  assert.equal(await verifyPassword(hash, "wrong password"), false);
+});
+
+// -------------------------------------------------------------------- TOTP --
+section("TOTP (2FA)");
+
+test("a secret round-trips: the code an authenticator app would generate verifies", async () => {
+  const OTPAuth = await import("otpauth");
+  const secret = generateTotpSecret();
+  // Generate the "current code" exactly the way a real authenticator app
+  // would, independently of verifyTotpCode, so this actually exercises the
+  // wrapper against the real otpauth library rather than against itself.
+  const totp = new OTPAuth.TOTP({
+    algorithm: "SHA1",
+    digits: 6,
+    period: 30,
+    secret: OTPAuth.Secret.fromBase32(secret),
+  });
+  const code = totp.generate();
+  assert.equal(verifyTotpCode(secret, code), true);
+});
+
+test("a wrong code is rejected", () => {
+  const secret = generateTotpSecret();
+  assert.equal(verifyTotpCode(secret, "000000"), false);
+});
+
+test("a code for a different secret is rejected", async () => {
+  const OTPAuth = await import("otpauth");
+  const secretA = generateTotpSecret();
+  const secretB = generateTotpSecret();
+  const codeForB = new OTPAuth.TOTP({
+    algorithm: "SHA1",
+    digits: 6,
+    period: 30,
+    secret: OTPAuth.Secret.fromBase32(secretB),
+  }).generate();
+  assert.equal(verifyTotpCode(secretA, codeForB), false);
+});
+
+test("the otpauth:// URI carries the issuer and account label", () => {
+  const secret = generateTotpSecret();
+  const uri = buildOtpAuthUri(secret, "tan@hatgao.com.cy");
+  assert.match(uri, /^otpauth:\/\/totp\//);
+  assert.match(uri, /Hat%20Gao%20Admin/);
+  assert.match(uri, /tan%40hatgao\.com\.cy/);
+});
+
+// ------------------------------------------------------------ recovery codes --
+section("2FA recovery codes");
+
+test("generates the requested count, formatted XXXXX-XXXXX", () => {
+  const codes = generateRecoveryCodes(10);
+  assert.equal(codes.length, 10);
+  for (const code of codes) {
+    assert.match(code, /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{5}$/);
+  }
+});
+
+test("codes are not obviously predictable duplicates of each other", () => {
+  const codes = generateRecoveryCodes(10);
+  assert.equal(new Set(codes).size, 10);
+});
+
+test("a generated code round-trips through hash and verify", async () => {
+  const codes = generateRecoveryCodes(3);
+  const hashes = await hashRecoveryCodes(codes);
+  const match = await verifyRecoveryCode(hashes, codes[1]!);
+  assert.equal(match, hashes[1]);
+});
+
+test("verification is case-insensitive and tolerates a missing dash", async () => {
+  const codes = generateRecoveryCodes(1);
+  const hashes = await hashRecoveryCodes(codes);
+  const messy = codes[0]!.toLowerCase().replace("-", "");
+  const match = await verifyRecoveryCode(hashes, messy);
+  assert.equal(match, hashes[0]);
+});
+
+test("an unknown code matches nothing", async () => {
+  const codes = generateRecoveryCodes(3);
+  const hashes = await hashRecoveryCodes(codes);
+  const match = await verifyRecoveryCode(hashes, "ZZZZZ-ZZZZZ");
+  assert.equal(match, null);
+});
+
+test("a matched hash can be removed, making the code single-use", async () => {
+  const codes = generateRecoveryCodes(3);
+  let hashes = await hashRecoveryCodes(codes);
+  const used = await verifyRecoveryCode(hashes, codes[0]!);
+  assert.ok(used);
+  hashes = hashes.filter((h) => h !== used);
+  const secondAttempt = await verifyRecoveryCode(hashes, codes[0]!);
+  assert.equal(secondAttempt, null, "a consumed code must not verify again");
+  // The other two codes are untouched by removing the first one's hash.
+  assert.ok(await verifyRecoveryCode(hashes, codes[1]!), "code[1] should still verify");
+  assert.ok(await verifyRecoveryCode(hashes, codes[2]!), "code[2] should still verify");
+});
+
+// ------------------------------------------------------------------- slug --
+section("Slug generation");
+
+test("lowercases and hyphenates", () => {
+  assert.equal(slugify("Summer Rolls (2 pcs)"), "summer-rolls-2-pcs");
+});
+
+test("strips accents down to their base letters", () => {
+  assert.equal(slugify("Café Latté"), "cafe-latte");
+});
+
+test("trims and collapses repeated separators", () => {
+  assert.equal(slugify("  Multiple   Spaces & Symbols!!!  "), "multiple-spaces-symbols");
+});
+
+test("never produces leading or trailing dashes", () => {
+  assert.equal(slugify("--Weird--Name--"), "weird-name");
+});
+
+test("an already-clean slug round-trips unchanged", () => {
+  assert.equal(slugify("beef-pho"), "beef-pho");
+});
+
+// ------------------------------------------------------------------ report --
+Promise.all(pending).then(() => {
+  console.log("\n" + "=".repeat(66));
+  if (failures.length === 0) {
+    console.log(`  ALL ${passed} TESTS PASSED`);
+  } else {
+    console.log(`  ${passed} passed, ${failures.length} FAILED\n`);
+    for (const f of failures) console.log(`  ✗ ${f}`);
+  }
+  console.log("=".repeat(66) + "\n");
+
+  process.exit(failures.length === 0 ? 0 : 1);
+});
