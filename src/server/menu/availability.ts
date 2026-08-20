@@ -10,6 +10,8 @@
  * cloud host are UTC and would put Hat Gao's closing time three hours early.
  */
 
+import { fromZonedTime } from "date-fns-tz";
+
 export type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0 = Sunday
 
 export type OpeningHoursRow = {
@@ -205,4 +207,22 @@ export function formatMinutes(minutes: number): string {
   const h = Math.floor(minutes / 60) % 24;
   const m = minutes % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/**
+ * The UTC instant of the *next* local midnight after `instant` — what
+ * "sold out for today" means to a staff member marking a product,
+ * regardless of what timezone the server's own clock thinks it's in.
+ *
+ * Built from `toLocalMoment` (for "what's today's date, locally") plus
+ * `date-fns-tz`'s `fromZonedTime` (for "what UTC instant is local midnight
+ * on date X" — correctly DST-aware, since it goes through the same IANA tz
+ * database `toLocalMoment` does, not a fixed offset).
+ */
+export function nextLocalMidnightUtc(instant: Date, timezone: string): Date {
+  const today = toLocalMoment(instant, timezone).dateKey; // "YYYY-MM-DD"
+  const [year, month, day] = today.split("-").map(Number);
+  const tomorrow = new Date(Date.UTC(year!, month! - 1, day! + 1));
+  const tomorrowKey = tomorrow.toISOString().slice(0, 10);
+  return fromZonedTime(`${tomorrowKey}T00:00:00`, timezone);
 }

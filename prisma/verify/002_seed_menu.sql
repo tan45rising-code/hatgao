@@ -1,3 +1,18 @@
+-- Prisma's `@updatedAt` (schema.prisma) is enforced by Prisma Client on every
+-- write it makes — it is NOT a database-level default. This script inserts
+-- with raw SQL via psql, bypassing Prisma Client, so the NOT NULL
+-- "updatedAt" column on these tables would otherwise get nothing. Set a
+-- temporary default for the duration of this script, then drop it again at
+-- the bottom so the DB stays in sync with what schema.prisma declares (no
+-- default) and a future `prisma db push` sees no drift.
+-- Idempotent: SET DEFAULT / DROP DEFAULT are both safe to repeat.
+ALTER TABLE settings ALTER COLUMN "updatedAt" SET DEFAULT now();
+ALTER TABLE categories ALTER COLUMN "updatedAt" SET DEFAULT now();
+ALTER TABLE modifier_groups ALTER COLUMN "updatedAt" SET DEFAULT now();
+ALTER TABLE modifiers ALTER COLUMN "updatedAt" SET DEFAULT now();
+ALTER TABLE products ALTER COLUMN "updatedAt" SET DEFAULT now();
+ALTER TABLE delivery_pricing_rules ALTER COLUMN "updatedAt" SET DEFAULT now();
+
 -- ------------------------------------------------------------- SETTINGS ---
 INSERT INTO settings (id) VALUES ('singleton')
 ON CONFLICT DO NOTHING;
@@ -241,3 +256,11 @@ INSERT INTO delivery_pricing_rules (id, priority, "ruleType", config) VALUES
   ('dpr-base',  30, 'CAPPED_PASS_THROUGH',
    '{"capCents": 400, "reason": "Below the free-delivery threshold the customer pays Wolt cost up to €4.00 — Hat Gao absorbs any excess."}')
 ON CONFLICT DO NOTHING;
+
+-- Drop the temporary defaults again — see note at the top of this file.
+ALTER TABLE settings ALTER COLUMN "updatedAt" DROP DEFAULT;
+ALTER TABLE categories ALTER COLUMN "updatedAt" DROP DEFAULT;
+ALTER TABLE modifier_groups ALTER COLUMN "updatedAt" DROP DEFAULT;
+ALTER TABLE modifiers ALTER COLUMN "updatedAt" DROP DEFAULT;
+ALTER TABLE products ALTER COLUMN "updatedAt" DROP DEFAULT;
+ALTER TABLE delivery_pricing_rules ALTER COLUMN "updatedAt" DROP DEFAULT;
