@@ -23,12 +23,23 @@ function initialSelection(group: PublicModifierGroup): Set<string> {
   return new Set();
 }
 
+function initialSelectionsFor(product: PublicProduct): Record<string, Set<string>> {
+  const initial: Record<string, Set<string>> = {};
+  for (const group of product.modifierGroups) {
+    initial[group.id] = initialSelection(group);
+  }
+  return initial;
+}
+
 function groupSatisfied(group: PublicModifierGroup, count: number): boolean {
   if (group.isRequired && count === 0) return false;
   if (count > 0 && count < group.minSelect) return false;
   if (count > group.maxSelect) return false;
   return true;
 }
+
+const CROSSFADE_MS = 150;
+const CLOSE_MS = 200;
 
 export function ProductDetailSheet({
   product,
@@ -51,28 +62,57 @@ export function ProductDetailSheet({
   const [selections, setSelections] = useState<Record<string, Set<string>>>({});
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState("");
-  const [visible, setVisible] = useState(false);
 
-  // Reset local state fresh every time a (possibly different) product opens.
-  useEffect(() => {
-    if (!product) return;
-    const initial: Record<string, Set<string>> = {};
-    for (const group of product.modifierGroups) {
-      initial[group.id] = initialSelection(group);
-    }
-    setSelections(initial);
+  // What's actually rendered. Deliberately a step behind `product` during
+  // a same-sheet swap (tapping an "Often bought with" card) — see the
+  // effect below — so the old content can fade out before the new
+  // content fades in, instead of jump-cutting.
+  const [displayedProduct, setDisplayedProduct] = useState<PublicProduct | null>(null);
+  // Whole-sheet open/close: backdrop opacity + panel slide.
+  const [visible, setVisible] = useState(false);
+  // Just the photo+details crossfade for a same-sheet product swap —
+  // independent of `visible`, which only handles opening/closing.
+  const [contentVisible, setContentVisible] = useState(true);
+
+  function showProduct(next: PublicProduct) {
+    setDisplayedProduct(next);
+    setSelections(initialSelectionsFor(next));
     setQuantity(1);
     setNotes("");
-    const raf = requestAnimationFrame(() => setVisible(true));
-    return () => cancelAnimationFrame(raf);
-  }, [product]);
+    setContentVisible(true);
+  }
 
   useEffect(() => {
-    if (!product) setVisible(false);
-  }, [product]);
+    if (!product) {
+      // Closing: slide the sheet away, but keep rendering the last
+      // product until the animation finishes rather than going blank.
+      if (displayedProduct) {
+        setVisible(false);
+        const t = setTimeout(() => setDisplayedProduct(null), CLOSE_MS);
+        return () => clearTimeout(t);
+      }
+      return;
+    }
+
+    if (!displayedProduct) {
+      // Fresh open.
+      showProduct(product);
+      const raf = requestAnimationFrame(() => setVisible(true));
+      return () => cancelAnimationFrame(raf);
+    }
+
+    if (displayedProduct.id !== product.id) {
+      // Swapping to a different product while already open — e.g. tapping
+      // an "Often bought with" card. Fade the old content out, then swap
+      // and fade the new content in, rather than snapping straight over.
+      setContentVisible(false);
+      const t = setTimeout(() => showProduct(product), CROSSFADE_MS);
+      return () => clearTimeout(t);
+    }
+  }, [product, displayedProduct]);
 
   useEffect(() => {
-    if (!product) return;
+    if (!displayedProduct) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") handleClose();
     }
@@ -82,30 +122,33 @@ export function ProductDetailSheet({
       document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = "";
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleClose is stable in effect over product's lifetime
-  }, [product]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleClose is stable; only care about open/closed, not which product
+  }, [displayedProduct !== null]);
 
   const allSelectedModifiers = useMemo(() => {
-    if (!product) return [];
-    return product.modifierGroups.flatMap((group) =>
+    if (!displayedProduct) return [];
+    return displayedProduct.modifierGroups.flatMap((group) =>
       group.modifiers.filter((m) => selections[group.id]?.has(m.id)),
     );
-  }, [product, selections]);
+  }, [displayedProduct, selections]);
 
   const unitPriceCents =
-    (product?.priceCents ?? 0) + allSelectedModifiers.reduce((sum, m) => sum + m.priceDeltaCents, 0);
+    (displayedProduct?.priceCents ?? 0) + allSelectedModifiers.reduce((sum, m) => sum + m.priceDeltaCents, 0);
 
   const allGroupsSatisfied =
-    product?.modifierGroups.every((group) => groupSatisfied(group, selections[group.id]?.size ?? 0)) ?? false;
+    displayedProduct?.modifierGroups.every((group) => groupSatisfied(group, selections[group.id]?.size ?? 0)) ??
+    false;
 
   const recommendations = useMemo(
-    () => (product ? getProductPageRecommendations(product, cart, allProducts, popularProductIds) : []),
-    [product, cart, allProducts, popularProductIds],
+    () =>
+      displayedProduct
+        ? getProductPageRecommendations(displayedProduct, cart, allProducts, popularProductIds)
+        : [],
+    [displayedProduct, cart, allProducts, popularProductIds],
   );
 
   function handleClose() {
-    setVisible(false);
-    window.setTimeout(onClose, 200);
+    onClose();
   }
 
   function toggleModifier(group: PublicModifierGroup, modifierId: string) {
@@ -133,19 +176,19 @@ export function ProductDetailSheet({
   }
 
   function handleAddToCart() {
-    if (!product || !allGroupsSatisfied) return;
+    if (!displayedProduct || !allGroupsSatisfied) return;
     addLine({
-      productId: product.id,
-      categoryId: product.categoryId,
-      name: product.name,
-      menuNumber: product.menuNumber,
-      imageUrl: product.imageUrl,
+      productId: displayedProduct.id,
+      categoryId: displayedProduct.categoryId,
+      name: displayedProduct.name,
+      menuNumber: displayedProduct.menuNumber,
+      imageUrl: displayedProduct.imageUrl,
       unitPriceCents,
       quantity,
       notes: notes.trim(),
       modifiers: allSelectedModifiers.map((m) => ({
         modifierId: m.id,
-        groupId: product.modifierGroups.find((g) => g.modifiers.some((x) => x.id === m.id))!.id,
+        groupId: displayedProduct.modifierGroups.find((g) => g.modifiers.some((x) => x.id === m.id))!.id,
         name: m.name,
         priceDeltaCents: m.priceDeltaCents,
       })),
@@ -153,7 +196,7 @@ export function ProductDetailSheet({
     handleClose();
   }
 
-  if (!product) return null;
+  if (!displayedProduct) return null;
 
   return (
     <div
@@ -166,7 +209,7 @@ export function ProductDetailSheet({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={product.name}
+        aria-label={displayedProduct.name}
         onClick={(e) => e.stopPropagation()}
         className={cn(
           "flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white transition-transform duration-200 sm:max-w-lg sm:rounded-2xl",
@@ -174,7 +217,20 @@ export function ProductDetailSheet({
         )}
       >
         <div className="relative shrink-0">
-          <ProductPhoto src={product.imageUrl} alt={product.imageAlt ?? product.name} className="h-44 w-full sm:h-56" />
+          <div
+            className={cn(
+              "transition-all duration-150 ease-out",
+              contentVisible ? "opacity-100" : "opacity-0",
+            )}
+          >
+            <ProductPhoto
+              src={displayedProduct.imageUrl}
+              alt={displayedProduct.imageAlt ?? displayedProduct.name}
+              className="h-44 w-full sm:h-56"
+            />
+          </div>
+          {/* Kept outside the crossfade — closing should never depend on
+              a transition having settled. */}
           <button
             type="button"
             onClick={handleClose}
@@ -185,22 +241,29 @@ export function ProductDetailSheet({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div
+          className={cn(
+            "flex-1 overflow-y-auto px-5 py-4 transition-all duration-150 ease-out",
+            contentVisible ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
+          )}
+        >
           <div className="flex items-baseline gap-2">
-            {product.menuNumber !== null && (
-              <span className="text-sm font-semibold text-hg-red">#{product.menuNumber}</span>
+            {displayedProduct.menuNumber !== null && (
+              <span className="text-sm font-semibold text-hg-red">#{displayedProduct.menuNumber}</span>
             )}
-            <h2 className="font-display text-xl font-semibold text-hg-ink">{product.name}</h2>
+            <h2 className="font-display text-xl font-semibold text-hg-ink">{displayedProduct.name}</h2>
           </div>
-          {product.description && <p className="mt-1.5 text-sm text-hg-brown/80">{product.description}</p>}
-          <p className="mt-2 text-base font-semibold text-hg-ink">{formatCents(product.priceCents)}</p>
-          {product.containsAlcohol && (
+          {displayedProduct.description && (
+            <p className="mt-1.5 text-sm text-hg-brown/80">{displayedProduct.description}</p>
+          )}
+          <p className="mt-2 text-base font-semibold text-hg-ink">{formatCents(displayedProduct.priceCents)}</p>
+          {displayedProduct.containsAlcohol && (
             <p className="mt-2 rounded-md bg-hg-gold/15 px-3 py-2 text-xs text-hg-brown">
               Age-restricted — available for collection only, not delivery.
             </p>
           )}
 
-          {product.modifierGroups.map((group) => {
+          {displayedProduct.modifierGroups.map((group) => {
             const count = selections[group.id]?.size ?? 0;
             return (
               <fieldset key={group.id} className="mt-5 border-t border-hg-brown/10 pt-4">

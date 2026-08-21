@@ -28,15 +28,16 @@ export function MostOrderedSection({
     <section className="pt-4">
       <div className="flex items-center justify-between px-3 sm:px-6">
         <h2 className="font-display text-xl font-semibold text-hg-ink">Most Ordered</h2>
-        {products.length > PREVIEW_COUNT && (
-          <button
-            type="button"
-            onClick={() => setSeeAllOpen(true)}
-            className="text-sm font-medium text-hg-red hover:underline"
-          >
-            See all
-          </button>
-        )}
+        {/* Always shown, even when the preview already covers every ranked
+            product — "See all" is also just a denser, no-scrolling view
+            of the same list, not only an overflow escape hatch. */}
+        <button
+          type="button"
+          onClick={() => setSeeAllOpen(true)}
+          className="text-sm font-medium text-hg-red hover:underline"
+        >
+          See all
+        </button>
       </div>
       <div className="scrollbar-none mt-3 flex snap-x gap-3 overflow-x-auto px-3 pb-2 sm:px-6">
         {preview.map((product) => (
