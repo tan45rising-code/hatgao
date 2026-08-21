@@ -14,6 +14,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/server/db";
 import { recordAuditLog } from "@/server/audit/log";
 import { parsePriceToCents } from "@/lib/money";
+import { revalidatePublicMenu } from "@/server/menu/revalidate-public-menu";
 
 function checkboxValue(formData: FormData, name: string): boolean {
   return formData.get(name) === "on";
@@ -68,6 +69,7 @@ export async function createGroupAction(formData: FormData): Promise<void> {
   });
 
   revalidatePath("/admin/menu/modifier-groups");
+  revalidatePublicMenu();
   redirect(`/admin/menu/modifier-groups/${group.id}`);
 }
 
@@ -107,6 +109,7 @@ export async function updateGroupAction(id: string, formData: FormData): Promise
   });
 
   revalidatePath("/admin/menu/modifier-groups");
+  revalidatePublicMenu();
   redirect(`/admin/menu/modifier-groups/${id}`);
 }
 
@@ -126,6 +129,7 @@ export async function deleteGroupAction(id: string): Promise<void> {
   });
 
   revalidatePath("/admin/menu/modifier-groups");
+  revalidatePublicMenu();
   redirect("/admin/menu/modifier-groups");
 }
 
@@ -160,6 +164,7 @@ export async function createModifierAction(groupId: string, formData: FormData):
   });
 
   revalidatePath(`/admin/menu/modifier-groups/${groupId}`);
+  revalidatePublicMenu();
   redirect(`/admin/menu/modifier-groups/${groupId}`);
 }
 
@@ -179,6 +184,7 @@ export async function deleteModifierAction(groupId: string, modifierId: string):
   });
 
   revalidatePath(`/admin/menu/modifier-groups/${groupId}`);
+  revalidatePublicMenu();
   redirect(`/admin/menu/modifier-groups/${groupId}`);
 }
 
@@ -201,4 +207,5 @@ export async function toggleModifierAvailabilityAction(groupId: string, modifier
   });
 
   revalidatePath(`/admin/menu/modifier-groups/${groupId}`);
+  revalidatePublicMenu();
 }

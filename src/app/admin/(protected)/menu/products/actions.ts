@@ -26,6 +26,7 @@ import { slugify } from "@/lib/slug";
 import { parsePriceToCents } from "@/lib/money";
 import { nextLocalMidnightUtc } from "@/server/menu/availability";
 import { processAndUploadProductImage, deleteProductImage, InvalidImageError } from "@/server/menu/product-image";
+import { revalidatePublicMenu } from "@/server/menu/revalidate-public-menu";
 
 function checkboxValue(formData: FormData, name: string): boolean {
   return formData.get(name) === "on";
@@ -132,6 +133,7 @@ export async function createProductAction(formData: FormData): Promise<void> {
   });
 
   revalidatePath("/admin/menu/products");
+  revalidatePublicMenu();
   redirect("/admin/menu/products");
 }
 
@@ -198,6 +200,7 @@ export async function updateProductAction(id: string, formData: FormData): Promi
   });
 
   revalidatePath("/admin/menu/products");
+  revalidatePublicMenu();
   redirect("/admin/menu/products");
 }
 
@@ -221,6 +224,7 @@ export async function deleteProductAction(id: string, category: string | null): 
   });
 
   revalidatePath("/admin/menu/products");
+  revalidatePublicMenu();
   redirect(category ? `/admin/menu/products?category=${category}` : "/admin/menu/products");
 }
 
@@ -272,4 +276,5 @@ export async function updateAvailabilityStatusAction(id: string, formData: FormD
   });
 
   revalidatePath("/admin/menu/products");
+  revalidatePublicMenu();
 }

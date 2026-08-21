@@ -18,6 +18,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/server/db";
 import { recordAuditLog } from "@/server/audit/log";
 import { slugify } from "@/lib/slug";
+import { revalidatePublicMenu } from "@/server/menu/revalidate-public-menu";
 
 // A native checkbox is absent from FormData entirely when unchecked (not
 // `false`, not empty — genuinely missing, the same class of gotcha as the
@@ -62,6 +63,7 @@ export async function createCategoryAction(formData: FormData): Promise<void> {
   });
 
   revalidatePath("/admin/menu");
+  revalidatePublicMenu();
   redirect("/admin/menu");
 }
 
@@ -91,6 +93,7 @@ export async function updateCategoryAction(id: string, formData: FormData): Prom
   });
 
   revalidatePath("/admin/menu");
+  revalidatePublicMenu();
   redirect("/admin/menu");
 }
 
@@ -110,5 +113,6 @@ export async function deleteCategoryAction(id: string): Promise<void> {
   });
 
   revalidatePath("/admin/menu");
+  revalidatePublicMenu();
   redirect("/admin/menu");
 }
