@@ -5,22 +5,33 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PublicProduct } from "@/server/menu/public-menu";
 import { ProductCard } from "./product-card";
+import { MostOrderedCard } from "./most-ordered-card";
 
 /**
- * "See all" behind the Most Ordered carousel — the same ranked list
- * (most-ordered-section.tsx only previews the first few), shown in full
- * as a 2-column grid via the regular ProductCard rather than the
- * carousel's compact one. Same open/close animation pattern as
- * ProductDetailSheet.
+ * The "show everything" sheet behind a preview strip/grid — used for both
+ * "Most Ordered → See all" (most-ordered-section.tsx) and
+ * "Recommended for you → Show all" (cart-drawer.tsx). Same open/close
+ * animation pattern as ProductDetailSheet.
+ *
+ * Two variants because the two callers want different densities:
+ * "detailed" is the regular wide ProductCard (with description), 1 column
+ * on mobile / 2 on larger screens — right for "here's the whole popular
+ * menu". "compact" is the small vertical card, a strict 2 columns even on
+ * mobile — right for a shorter, denser suggestion list, and matches the
+ * preview grid it's expanding on from.
  */
-export function MostOrderedAllSheet({
+export function ProductListSheet({
   open,
+  title,
   products,
+  variant = "detailed",
   onClose,
   onSelectProduct,
 }: {
   open: boolean;
+  title: string;
   products: PublicProduct[];
+  variant?: "detailed" | "compact";
   onClose: () => void;
   onSelectProduct: (product: PublicProduct) => void;
 }) {
@@ -60,7 +71,7 @@ export function MostOrderedAllSheet({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Most Ordered"
+        aria-label={title}
         onClick={(e) => e.stopPropagation()}
         className={cn(
           "absolute inset-x-0 bottom-0 flex max-h-[90vh] flex-col overflow-hidden rounded-t-2xl bg-hg-bg transition-transform duration-200 sm:inset-x-auto sm:left-1/2 sm:top-1/2 sm:max-h-[85vh] sm:w-full sm:max-w-2xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl",
@@ -68,7 +79,7 @@ export function MostOrderedAllSheet({
         )}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-hg-brown/10 bg-white px-5 py-4">
-          <h2 className="font-display text-lg font-semibold text-hg-ink">Most Ordered</h2>
+          <h2 className="font-display text-lg font-semibold text-hg-ink">{title}</h2>
           <button
             type="button"
             onClick={handleClose}
@@ -79,11 +90,24 @@ export function MostOrderedAllSheet({
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-5">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {products.map((product) => (
-              <ProductCard key={product.id} product={product} onSelect={onSelectProduct} />
-            ))}
-          </div>
+          {variant === "detailed" ? (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {products.map((product) => (
+                <ProductCard key={product.id} product={product} onSelect={onSelectProduct} />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {products.map((product) => (
+                <MostOrderedCard
+                  key={product.id}
+                  product={product}
+                  onSelect={onSelectProduct}
+                  className="w-full"
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ShoppingBag, Trash2, X } from "lucide-react";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -10,7 +10,12 @@ import { getCartRecommendations } from "@/lib/cart/recommendations";
 import type { PublicProduct } from "@/server/menu/public-menu";
 import { QuantityStepper } from "@/components/ui/quantity-stepper";
 import { MostOrderedCard } from "./most-ordered-card";
+import { ProductListSheet } from "./product-list-sheet";
 import { ProductPhoto } from "./product-photo";
+
+/** 2 columns × 4 rows before "Show all" — the full list (up to 20, see
+ * recommendations.ts) lives behind that button instead. */
+const PREVIEW_COUNT = 8;
 
 export function CartDrawer({
   allProducts,
@@ -23,11 +28,13 @@ export function CartDrawer({
 }) {
   const { cart, isDrawerOpen, closeDrawer, updateQuantity, removeLine } = useCart();
   const total = cartTotalCents(cart);
+  const [showAllOpen, setShowAllOpen] = useState(false);
 
   const recommendations = useMemo(
     () => getCartRecommendations(cart, allProducts, popularProductIds),
     [cart, allProducts, popularProductIds],
   );
+  const preview = recommendations.slice(0, PREVIEW_COUNT);
 
   function handleSelectRecommendation(product: PublicProduct) {
     // Leaving the drawer to look at a recommended item, rather than
@@ -119,18 +126,28 @@ export function CartDrawer({
                 ))}
               </ul>
 
-              {recommendations.length > 0 && (
-                <div className="mt-5">
-                  <h3 className="px-5 text-sm font-semibold text-hg-ink">Often bought with</h3>
-                  <div className="scrollbar-none mt-2 flex snap-x gap-3 overflow-x-auto px-5 pb-1">
-                    {recommendations.map((product) => (
+              {preview.length > 0 && (
+                <div className="mt-5 px-5">
+                  <h3 className="mb-2 text-sm font-semibold text-hg-ink">Recommended for you</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    {preview.map((product) => (
                       <MostOrderedCard
                         key={product.id}
                         product={product}
                         onSelect={handleSelectRecommendation}
+                        className="w-full"
                       />
                     ))}
                   </div>
+                  {recommendations.length > PREVIEW_COUNT && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllOpen(true)}
+                      className="mt-3 w-full rounded-full border border-hg-brown/20 bg-white px-5 py-2 text-sm font-semibold text-hg-ink transition-colors hover:bg-hg-bg"
+                    >
+                      Show all
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -154,6 +171,18 @@ export function CartDrawer({
           </>
         )}
       </div>
+
+      <ProductListSheet
+        open={showAllOpen}
+        title="Recommended for you"
+        products={recommendations}
+        variant="compact"
+        onClose={() => setShowAllOpen(false)}
+        onSelectProduct={(product) => {
+          setShowAllOpen(false);
+          handleSelectRecommendation(product);
+        }}
+      />
     </div>
   );
 }

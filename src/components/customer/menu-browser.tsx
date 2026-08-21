@@ -5,9 +5,14 @@ import type { PublicCategory, PublicProduct } from "@/server/menu/public-menu";
 import { CategoryNav, categorySectionId } from "./category-nav";
 import { CartDrawer } from "./cart-drawer";
 import { MostOrderedSection } from "./most-ordered-section";
-import { MostOrderedAllSheet } from "./most-ordered-all-sheet";
 import { ProductCard } from "./product-card";
 import { ProductDetailSheet } from "./product-detail-sheet";
+
+/** Only the top 5 of the Most Ordered ranking get the "Popular" badge —
+ * the ranking itself (mostOrdered, up to 30) is still used in full as the
+ * relevance tiebreaker for recommendations, which is a different concern
+ * from what earns a badge on the card. */
+const POPULAR_BADGE_COUNT = 5;
 
 export function MenuBrowser({
   categories,
@@ -17,26 +22,20 @@ export function MenuBrowser({
   mostOrdered: PublicProduct[];
 }) {
   const [selectedProduct, setSelectedProduct] = useState<PublicProduct | null>(null);
-  const [isMostOrderedAllOpen, setIsMostOrderedAllOpen] = useState(false);
 
-  // Both derived from the same page-load data, so plain useMemo is enough
+  // All derived from the same page-load data, so plain useMemo is enough
   // — no need to recompute these unless the menu itself changes.
   const allProducts = useMemo(() => categories.flatMap((c) => c.products), [categories]);
   const popularProductIds = useMemo(() => new Set(mostOrdered.map((p) => p.id)), [mostOrdered]);
-
-  function selectFromMostOrderedAll(product: PublicProduct) {
-    setIsMostOrderedAllOpen(false);
-    setSelectedProduct(product);
-  }
+  const popularBadgeIds = useMemo(
+    () => new Set(mostOrdered.slice(0, POPULAR_BADGE_COUNT).map((p) => p.id)),
+    [mostOrdered],
+  );
 
   return (
     <>
       <div className="mx-auto max-w-3xl">
-        <MostOrderedSection
-          products={mostOrdered}
-          onSelect={setSelectedProduct}
-          onSeeAll={() => setIsMostOrderedAllOpen(true)}
-        />
+        <MostOrderedSection products={mostOrdered} onSelect={setSelectedProduct} />
       </div>
 
       <CategoryNav categories={categories} />
@@ -59,7 +58,7 @@ export function MenuBrowser({
                   key={product.id}
                   product={product}
                   onSelect={setSelectedProduct}
-                  isPopular={popularProductIds.has(product.id)}
+                  isPopular={popularBadgeIds.has(product.id)}
                 />
               ))}
             </div>
@@ -67,13 +66,12 @@ export function MenuBrowser({
         ))}
       </main>
 
-      <ProductDetailSheet product={selectedProduct} onClose={() => setSelectedProduct(null)} />
-
-      <MostOrderedAllSheet
-        open={isMostOrderedAllOpen}
-        products={mostOrdered}
-        onClose={() => setIsMostOrderedAllOpen(false)}
-        onSelectProduct={selectFromMostOrderedAll}
+      <ProductDetailSheet
+        product={selectedProduct}
+        allProducts={allProducts}
+        popularProductIds={popularProductIds}
+        onClose={() => setSelectedProduct(null)}
+        onSelectProduct={setSelectedProduct}
       />
 
       <CartDrawer

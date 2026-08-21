@@ -16,9 +16,14 @@ import { ProductPhoto } from "./product-photo";
 export function MostOrderedCard({
   product,
   onSelect,
+  className,
 }: {
   product: PublicProduct;
   onSelect: (product: PublicProduct) => void;
+  /** Overrides the default fixed carousel width — pass "w-full" when this
+   * is laid out in a grid instead of a horizontal scroll strip (e.g.
+   * product-list-sheet.tsx's "compact" variant). */
+  className?: string;
 }) {
   const soldOut = !product.isAvailable;
   const Tag = soldOut ? "div" : "button";
@@ -31,6 +36,7 @@ export function MostOrderedCard({
       className={cn(
         "flex w-32 shrink-0 snap-start flex-col rounded-xl border border-hg-brown/10 bg-white p-2 text-left shadow-sm transition-all sm:w-36",
         soldOut ? "opacity-70" : "hover:-translate-y-0.5 hover:shadow-md",
+        className,
       )}
     >
       <div className="relative aspect-square w-full">

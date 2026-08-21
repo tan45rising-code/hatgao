@@ -37,11 +37,11 @@ const STATUSES_COUNTED_AS_ORDERED = [
   "COMPLETED",
 ] as const;
 
-/** The carousel only previews a handful (see most-ordered-section.tsx);
- * this is the ceiling for the full "See all" list behind it, and for the
- * popularity signal recommendations.ts uses — not meant to be literally
- * every product anyone's ever ordered once. */
-const DEFAULT_LIMIT = 20;
+/** The carousel only previews the top 10 (see most-ordered-section.tsx);
+ * this is the ceiling for the full "See all" list behind it (up to 30),
+ * and for the popularity signal recommendations.ts uses — not meant to
+ * be literally every product anyone's ever ordered once. */
+const DEFAULT_LIMIT = 30;
 
 export async function getMostOrderedProducts(limit = DEFAULT_LIMIT): Promise<PublicProduct[]> {
   const ranked = await prisma.orderItem.groupBy({

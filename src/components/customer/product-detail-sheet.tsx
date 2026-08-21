@@ -5,8 +5,10 @@ import { X } from "lucide-react";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { useCart } from "@/lib/cart/cart-context";
+import { getProductPageRecommendations } from "@/lib/cart/recommendations";
 import type { PublicModifierGroup, PublicProduct } from "@/server/menu/public-menu";
 import { QuantityStepper } from "@/components/ui/quantity-stepper";
+import { MostOrderedCard } from "./most-ordered-card";
 import { ProductPhoto } from "./product-photo";
 
 /** Picks the starting selection for a group: its default modifier(s) if any
@@ -30,12 +32,22 @@ function groupSatisfied(group: PublicModifierGroup, count: number): boolean {
 
 export function ProductDetailSheet({
   product,
+  allProducts,
+  popularProductIds,
   onClose,
+  onSelectProduct,
 }: {
   product: PublicProduct | null;
+  /** Whole catalog + Most Ordered ranking — needed for "Often bought
+   * with" at the bottom (src/lib/cart/recommendations.ts). */
+  allProducts: PublicProduct[];
+  popularProductIds: ReadonlySet<string>;
   onClose: () => void;
+  /** Tapping a recommendation swaps this same sheet to that product
+   * (no close/reopen) — see the call site in menu-browser.tsx. */
+  onSelectProduct: (product: PublicProduct) => void;
 }) {
-  const { addLine } = useCart();
+  const { addLine, cart } = useCart();
   const [selections, setSelections] = useState<Record<string, Set<string>>>({});
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState("");
@@ -85,6 +97,11 @@ export function ProductDetailSheet({
 
   const allGroupsSatisfied =
     product?.modifierGroups.every((group) => groupSatisfied(group, selections[group.id]?.size ?? 0)) ?? false;
+
+  const recommendations = useMemo(
+    () => (product ? getProductPageRecommendations(product, cart, allProducts, popularProductIds) : []),
+    [product, cart, allProducts, popularProductIds],
+  );
 
   function handleClose() {
     setVisible(false);
@@ -252,6 +269,17 @@ export function ProductDetailSheet({
               className="w-full rounded-lg border border-hg-brown/20 px-3 py-2 text-sm text-hg-ink placeholder:text-hg-brown/40 focus:border-hg-red focus:outline-none"
             />
           </div>
+
+          {recommendations.length > 0 && (
+            <div className="mt-5 border-t border-hg-brown/10 pt-4">
+              <h3 className="mb-2 text-sm font-semibold text-hg-ink">Often bought with</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {recommendations.map((rec) => (
+                  <MostOrderedCard key={rec.id} product={rec} onSelect={onSelectProduct} className="w-full" />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-3 border-t border-hg-brown/10 bg-white px-5 py-4">

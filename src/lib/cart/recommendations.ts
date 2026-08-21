@@ -1,38 +1,41 @@
 /**
- * "Often bought with" — shown in the cart drawer (cart-drawer.tsx), reacts
- * to the current cart's contents.
+ * Category-gap-filling recommendations, used in two places:
+ *   - getProductPageRecommendations: "Often bought with" at the bottom of
+ *     a product's detail popup (product-detail-sheet.tsx) — excludes that
+ *     product's own category (no point suggesting 3 more of what they're
+ *     already looking at) plus whatever's already in the cart.
+ *   - getCartRecommendations: "Recommended for you" in the cart drawer
+ *     (cart-drawer.tsx) — excludes only what's already in the cart.
  *
- * This is NOT "customers who bought X also bought Y" — that needs real
+ * Neither is "customers who bought X also bought Y" — that needs real
  * co-purchase history (which pairs of items showed up on the same order
  * together, repeatedly), and Phase 2 has zero real orders, let alone
  * repeated pairings. That bar is much higher than Most Ordered's (which
  * only needs *some* order history to rank individual items) — see
  * src/server/menu/most-ordered.ts for that reasoning.
  *
- * Instead this is a category-gap heuristic: look at which categories are
- * already in the cart, and suggest good picks from the categories that
- * AREN'T — no drink in the cart yet? suggest drinks. No starter? suggest
- * starters. This works immediately with zero order history and gets
- * smarter for free once real popularity data exists (it's used as the
- * tiebreaker), but it never needs orders to function at all.
+ * Instead this looks at which categories are already spoken for and
+ * suggests good picks from the ones that aren't — no drink yet? suggest
+ * drinks. No starter? suggest starters. Works immediately with zero order
+ * history and gets smarter for free once real popularity data exists
+ * (used as the tiebreaker), but never needs orders to function at all.
  */
 
 import type { Cart } from "./types";
 import type { PublicProduct } from "@/server/menu/public-menu";
 
-const DEFAULT_LIMIT = 6;
+const CART_RECOMMENDATION_LIMIT = 20;
+const PRODUCT_PAGE_RECOMMENDATION_LIMIT = 6;
 
-export function getCartRecommendations(
-  cart: Cart,
+function pickRecommendations(
+  excludedProductIds: ReadonlySet<string>,
+  excludedCategoryIds: ReadonlySet<string>,
   allProducts: PublicProduct[],
   popularProductIds: ReadonlySet<string>,
-  limit = DEFAULT_LIMIT,
+  limit: number,
 ): PublicProduct[] {
-  const inCartProductIds = new Set(cart.lines.map((l) => l.productId));
-  const inCartCategoryIds = new Set(cart.lines.map((l) => l.categoryId));
-
-  // Never suggest something already in the cart or currently unorderable.
-  const eligible = allProducts.filter((p) => p.isAvailable && !inCartProductIds.has(p.id));
+  // Never suggest something already excluded or currently unorderable.
+  const eligible = allProducts.filter((p) => p.isAvailable && !excludedProductIds.has(p.id));
 
   // Popular items first (once that data exists); ties fall back to the
   // menu's own order, which is already what the restaurant intends people
@@ -43,8 +46,8 @@ export function getCartRecommendations(
     return aPopular - bPopular;
   };
 
-  const missingCategory = eligible.filter((p) => !inCartCategoryIds.has(p.categoryId));
-  const sameCategory = eligible.filter((p) => inCartCategoryIds.has(p.categoryId));
+  const missingCategory = eligible.filter((p) => !excludedCategoryIds.has(p.categoryId));
+  const sameCategory = eligible.filter((p) => excludedCategoryIds.has(p.categoryId));
 
   const picks: PublicProduct[] = [];
   const pickedIds = new Set<string>();
@@ -74,11 +77,37 @@ export function getCartRecommendations(
     take([...missingCategory].sort(byRelevance));
   }
 
-  // Round 3: still short (small catalog, or the cart already spans every
-  // category) — round out with more from categories already in the cart.
+  // Round 3: still short (small catalog, or every category is already
+  // spoken for) — round out with more from categories already excluded.
   if (picks.length < limit) {
     take([...sameCategory].sort(byRelevance));
   }
 
   return picks;
+}
+
+/** Preview lengths (2×4 grid, 2×3 grid) are just `.slice()`s of this same
+ * ordering — computing the longer list once and slicing keeps a preview
+ * and its own "show more" from ever visibly disagreeing with each other. */
+export function getCartRecommendations(
+  cart: Cart,
+  allProducts: PublicProduct[],
+  popularProductIds: ReadonlySet<string>,
+  limit = CART_RECOMMENDATION_LIMIT,
+): PublicProduct[] {
+  const excludedProductIds = new Set(cart.lines.map((l) => l.productId));
+  const excludedCategoryIds = new Set(cart.lines.map((l) => l.categoryId));
+  return pickRecommendations(excludedProductIds, excludedCategoryIds, allProducts, popularProductIds, limit);
+}
+
+export function getProductPageRecommendations(
+  product: PublicProduct,
+  cart: Cart,
+  allProducts: PublicProduct[],
+  popularProductIds: ReadonlySet<string>,
+  limit = PRODUCT_PAGE_RECOMMENDATION_LIMIT,
+): PublicProduct[] {
+  const excludedProductIds = new Set([product.id, ...cart.lines.map((l) => l.productId)]);
+  const excludedCategoryIds = new Set([product.categoryId, ...cart.lines.map((l) => l.categoryId)]);
+  return pickRecommendations(excludedProductIds, excludedCategoryIds, allProducts, popularProductIds, limit);
 }

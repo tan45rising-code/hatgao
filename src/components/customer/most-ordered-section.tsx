@@ -1,20 +1,22 @@
 "use client";
 
+import { useState } from "react";
 import type { PublicProduct } from "@/server/menu/public-menu";
 import { MostOrderedCard } from "./most-ordered-card";
+import { ProductListSheet } from "./product-list-sheet";
 
 /** How many show in the horizontal strip before "See all" is needed. */
-const PREVIEW_COUNT = 8;
+const PREVIEW_COUNT = 10;
 
 export function MostOrderedSection({
   products,
   onSelect,
-  onSeeAll,
 }: {
   products: PublicProduct[];
   onSelect: (product: PublicProduct) => void;
-  onSeeAll: () => void;
 }) {
+  const [seeAllOpen, setSeeAllOpen] = useState(false);
+
   // No real orders yet (Phase 2 has no checkout) means no ranking to show
   // — see most-ordered.ts for why this is an empty array rather than a
   // guess, and why that's the right call rather than a placeholder.
@@ -29,7 +31,7 @@ export function MostOrderedSection({
         {products.length > PREVIEW_COUNT && (
           <button
             type="button"
-            onClick={onSeeAll}
+            onClick={() => setSeeAllOpen(true)}
             className="text-sm font-medium text-hg-red hover:underline"
           >
             See all
@@ -41,6 +43,17 @@ export function MostOrderedSection({
           <MostOrderedCard key={product.id} product={product} onSelect={onSelect} />
         ))}
       </div>
+
+      <ProductListSheet
+        open={seeAllOpen}
+        title="Most Ordered"
+        products={products}
+        onClose={() => setSeeAllOpen(false)}
+        onSelectProduct={(product) => {
+          setSeeAllOpen(false);
+          onSelect(product);
+        }}
+      />
     </section>
   );
 }
