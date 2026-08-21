@@ -15,14 +15,18 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { buildLineId, EMPTY_CART, type Cart, type CartLine } from "./types";
 
 const STORAGE_KEY = "hatgao-cart-v1";
+const TOAST_DURATION_MS = 2200;
 
 type AddToCartInput = Omit<CartLine, "lineId" | "quantity"> & { quantity: number };
+
+type CartToast = { id: number; message: string };
 
 type CartContextValue = {
   cart: Cart;
@@ -37,6 +41,10 @@ type CartContextValue = {
   isDrawerOpen: boolean;
   openDrawer: () => void;
   closeDrawer: () => void;
+  /** Set briefly by addLine, read by CartToast (cart-toast.tsx). Not the
+   * drawer — adding an item shouldn't interrupt browsing (see the "don't
+   * pop the drawer open on every add" fix), just a quiet confirmation. */
+  toast: CartToast | null;
 };
 
 const CartContext = createContext<CartContextValue | null>(null);
@@ -65,6 +73,13 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const openDrawer = useCallback(() => setIsDrawerOpen(true), []);
   const closeDrawer = useCallback(() => setIsDrawerOpen(false), []);
 
+  const [toast, setToast] = useState<CartToast | null>(null);
+  const toastSeq = useRef(0);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
+
   useEffect(() => {
     setCart(loadCart());
     setHydrated(true);
@@ -91,6 +106,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
       }
       return { lines: [...prev.lines, { ...input, lineId }] };
     });
+
+    // Re-triggers even if a toast is already showing (new id, fresh
+    // timer) — adding a second item while the first toast is still up
+    // shows the new item's name and restarts the visible window, rather
+    // than the message going stale.
+    const id = ++toastSeq.current;
+    setToast({ id, message: `${input.name} added to cart` });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => {
+      setToast((current) => (current?.id === id ? null : current));
+    }, TOAST_DURATION_MS);
   }, []);
 
   const updateQuantity = useCallback((lineId: string, quantity: number) => {
@@ -127,8 +153,20 @@ export function CartProvider({ children }: { children: ReactNode }) {
       isDrawerOpen,
       openDrawer,
       closeDrawer,
+      toast,
     }),
-    [cart, addLine, updateQuantity, removeLine, updateNotes, clear, isDrawerOpen, openDrawer, closeDrawer],
+    [
+      cart,
+      addLine,
+      updateQuantity,
+      removeLine,
+      updateNotes,
+      clear,
+      isDrawerOpen,
+      openDrawer,
+      closeDrawer,
+      toast,
+    ],
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
