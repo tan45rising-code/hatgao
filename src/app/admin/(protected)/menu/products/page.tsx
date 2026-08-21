@@ -109,7 +109,7 @@ export default async function ProductsPage({
                 {confirm === product.id ? (
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-medium text-neutral-700">Delete?</span>
-                    <form action={deleteProductAction.bind(null, product.id)}>
+                    <form action={deleteProductAction.bind(null, product.id, category ?? null)}>
                       <Button type="submit" variant="destructive" size="sm">
                         Confirm
                       </Button>

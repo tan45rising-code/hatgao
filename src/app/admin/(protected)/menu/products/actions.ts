@@ -201,7 +201,11 @@ export async function updateProductAction(id: string, formData: FormData): Promi
   redirect("/admin/menu/products");
 }
 
-export async function deleteProductAction(id: string): Promise<void> {
+/** `category` is the list page's current filter (bound in from the page,
+ * not form input — see the form in products/page.tsx) so deleting a
+ * product from a filtered view redirects back to that same filter instead
+ * of silently dropping it back to "all categories". */
+export async function deleteProductAction(id: string, category: string | null): Promise<void> {
   const session = await requireOwner();
   const product = await prisma.product.update({
     where: { id },
@@ -217,7 +221,7 @@ export async function deleteProductAction(id: string): Promise<void> {
   });
 
   revalidatePath("/admin/menu/products");
-  redirect("/admin/menu/products");
+  redirect(category ? `/admin/menu/products?category=${category}` : "/admin/menu/products");
 }
 
 export type AvailabilityStatus = "available" | "unavailable" | "sold_out_today";
