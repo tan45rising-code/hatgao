@@ -3,11 +3,32 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Hat Gao brand palette — from the restaurant's logo/palette, not to be
+     rederived. Customer-facing UI (src/app/(customer)) uses these; the
+     admin dashboard intentionally stays neutral gray and doesn't. */
+  --color-hg-ink: #141313; /* near-black — primary text */
+  --color-hg-brown: #423628; /* dark brown — secondary text, borders */
+  --color-hg-red: #c52d24; /* brand red — CTAs, prices, active states */
+  --color-hg-gold: #e4af29; /* gold — accents, badges, highlights */
+  --color-hg-cream: #edc395; /* cream — header/hero background, matches logo */
+  --color-hg-bg: #fbf6ef; /* light tint of cream — main page background */
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  --color-hg-ink: var(--color-hg-ink);
+  --color-hg-brown: var(--color-hg-brown);
+  --color-hg-red: var(--color-hg-red);
+  --color-hg-gold: var(--color-hg-gold);
+  --color-hg-cream: var(--color-hg-cream);
+  --color-hg-bg: var(--color-hg-bg);
+
+  --font-display: var(--font-playfair);
+  --font-body: var(--font-be-vietnam);
+  --font-script: var(--font-alex-brush);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -21,4 +42,14 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* Hides the scrollbar on horizontally-scrolling strips (category tabs)
+   without disabling scroll itself — used on src/components/customer/category-nav.tsx. */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }

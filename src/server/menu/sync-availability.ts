@@ -3,12 +3,12 @@
  * `src/app/admin/(protected)/menu/products/actions.ts`): flips any product
  * whose `availableAgainAt` has passed back to available.
  *
- * No scheduler needed for this in V1 — the admin product list is the only
- * place this currently matters, so checking lazily right before it renders
- * is equivalent to a cron that runs "whenever someone looks". Once a real
- * job runner exists (architecture doc A.5, later phase) this is a natural
- * candidate to move there instead — nothing about the call site would
- * need to change.
+ * No scheduler needed for this in V1 — every call site (the admin product
+ * list, and now the public menu — see `src/server/menu/public-menu.ts`)
+ * checks lazily right before it renders, which is equivalent to a cron
+ * that runs "whenever someone looks". Once a real job runner exists
+ * (architecture doc A.5, later phase) this is a natural candidate to move
+ * there instead — nothing about the call sites would need to change.
  *
  * Kept out of `src/server/menu/availability.ts` deliberately: that file is
  * pure (no I/O) and is imported directly by the domain test suite via
