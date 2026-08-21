@@ -1,7 +1,13 @@
 /**
  * "Most Ordered" — a horizontal-scroll carousel of the site's best sellers
  * (src/components/customer/most-ordered-section.tsx), the way Wolt/UberEats
- * lead with a popular-items row before the category list.
+ * lead with a popular-items row before the category list. "See all" opens
+ * the rest of this same ranked list in a 2-column grid
+ * (most-ordered-all-sheet.tsx). The same ranking also drives the
+ * "Popular" badge on a product's card wherever else it appears
+ * (product-card.tsx) and the ordering of "Often bought with" suggestions
+ * (src/lib/cart/recommendations.ts) — one ranked list, three places it
+ * shows up.
  *
  * Ranked from real completed order volume — nothing here is curated or
  * guessed. Phase 2 has no checkout yet (no code creates an `Order` row
@@ -31,7 +37,11 @@ const STATUSES_COUNTED_AS_ORDERED = [
   "COMPLETED",
 ] as const;
 
-const DEFAULT_LIMIT = 10;
+/** The carousel only previews a handful (see most-ordered-section.tsx);
+ * this is the ceiling for the full "See all" list behind it, and for the
+ * popularity signal recommendations.ts uses — not meant to be literally
+ * every product anyone's ever ordered once. */
+const DEFAULT_LIMIT = 20;
 
 export async function getMostOrderedProducts(limit = DEFAULT_LIMIT): Promise<PublicProduct[]> {
   const ranked = await prisma.orderItem.groupBy({

@@ -21,6 +21,9 @@ export type CartLine = {
    * same dish added twice with different options doesn't merge. */
   lineId: string;
   productId: string;
+  /** Needed by recommendations.ts to know which categories the cart
+   * already covers — not shown anywhere in the cart UI itself. */
+  categoryId: string;
   name: string;
   menuNumber: number | null;
   imageUrl: string | null;

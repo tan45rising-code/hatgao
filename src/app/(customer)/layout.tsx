@@ -1,6 +1,5 @@
 import { Be_Vietnam_Pro, Playfair_Display, Alex_Brush } from "next/font/google";
 import { CartProvider } from "@/lib/cart/cart-context";
-import { CartDrawer } from "@/components/customer/cart-drawer";
 import { CartBar } from "@/components/customer/cart-bar";
 import { CartToast } from "@/components/customer/cart-toast";
 import { SiteHeader } from "@/components/customer/site-header";
@@ -37,7 +36,9 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
         {children}
         <CartBar />
         <CartToast />
-        <CartDrawer />
+        {/* CartDrawer now renders from MenuBrowser — it needs the full
+            product catalog (for "Often bought with") which only the page
+            has, not this route-group-wide layout. */}
       </CartProvider>
     </div>
   );

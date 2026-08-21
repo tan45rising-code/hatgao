@@ -119,6 +119,7 @@ export function ProductDetailSheet({
     if (!product || !allGroupsSatisfied) return;
     addLine({
       productId: product.id,
+      categoryId: product.categoryId,
       name: product.name,
       menuNumber: product.menuNumber,
       imageUrl: product.imageUrl,

@@ -56,6 +56,13 @@ export type PublicProduct = {
   pickupEligible: boolean;
   containsAlcohol: boolean;
   isAvailable: boolean;
+  /** Which menu category this belongs to — not needed by the category
+   * page itself (that's implicit from nesting), but most-ordered.ts
+   * fetches products flat, and the "often bought with" recommendation
+   * logic (src/lib/cart/recommendations.ts) needs it to know which
+   * categories a cart is missing. */
+  categoryId: string;
+  categoryName: string;
   modifierGroups: PublicModifierGroup[];
 };
 
@@ -73,6 +80,7 @@ export type PublicCategory = {
  * duplicating this include-and-map pair for a second query would be an
  * easy place for the two lists to quietly drift apart. */
 export const productIncludeForPublicMenu = {
+  category: { select: { id: true, name: true } },
   modifierGroups: {
     include: {
       group: {
@@ -88,6 +96,7 @@ export const productIncludeForPublicMenu = {
 } satisfies Prisma.ProductInclude;
 
 type ProductWithModifiers = Product & {
+  category: Prisma.ProductGetPayload<{ include: typeof productIncludeForPublicMenu }>["category"];
   modifierGroups: Prisma.ProductGetPayload<{ include: typeof productIncludeForPublicMenu }>["modifierGroups"];
 };
 
@@ -106,6 +115,8 @@ export function toPublicProduct(product: ProductWithModifiers): PublicProduct {
     pickupEligible: product.pickupEligible,
     containsAlcohol: product.containsAlcohol,
     isAvailable: product.isAvailable,
+    categoryId: product.category.id,
+    categoryName: product.category.name,
     modifierGroups: product.modifierGroups
       .filter((pmg) => pmg.group.isActive && pmg.group.deletedAt === null)
       .sort((a, b) => a.group.sortOrder - b.group.sortOrder)

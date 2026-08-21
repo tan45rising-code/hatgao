@@ -1,16 +1,41 @@
 "use client";
 
+import { useMemo } from "react";
 import { ShoppingBag, Trash2, X } from "lucide-react";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { useCart } from "@/lib/cart/cart-context";
 import { cartLineTotalCents, cartTotalCents } from "@/lib/cart/types";
+import { getCartRecommendations } from "@/lib/cart/recommendations";
+import type { PublicProduct } from "@/server/menu/public-menu";
 import { QuantityStepper } from "@/components/ui/quantity-stepper";
+import { MostOrderedCard } from "./most-ordered-card";
 import { ProductPhoto } from "./product-photo";
 
-export function CartDrawer() {
+export function CartDrawer({
+  allProducts,
+  popularProductIds,
+  onSelectProduct,
+}: {
+  allProducts: PublicProduct[];
+  popularProductIds: ReadonlySet<string>;
+  onSelectProduct: (product: PublicProduct) => void;
+}) {
   const { cart, isDrawerOpen, closeDrawer, updateQuantity, removeLine } = useCart();
   const total = cartTotalCents(cart);
+
+  const recommendations = useMemo(
+    () => getCartRecommendations(cart, allProducts, popularProductIds),
+    [cart, allProducts, popularProductIds],
+  );
+
+  function handleSelectRecommendation(product: PublicProduct) {
+    // Leaving the drawer to look at a recommended item, rather than
+    // stacking a second overlay on top of it — same reasoning as closing
+    // the detail sheet before opening the drawer on add-to-cart.
+    closeDrawer();
+    onSelectProduct(product);
+  }
 
   return (
     <div
@@ -50,8 +75,8 @@ export function CartDrawer() {
           </div>
         ) : (
           <>
-            <div className="flex-1 overflow-y-auto px-5 py-4">
-              <ul className="space-y-4">
+            <div className="flex-1 overflow-y-auto py-4">
+              <ul className="space-y-4 px-5">
                 {cart.lines.map((line) => (
                   <li key={line.lineId} className="flex gap-3 rounded-xl bg-white p-3 shadow-sm">
                     <ProductPhoto
@@ -93,6 +118,21 @@ export function CartDrawer() {
                   </li>
                 ))}
               </ul>
+
+              {recommendations.length > 0 && (
+                <div className="mt-5">
+                  <h3 className="px-5 text-sm font-semibold text-hg-ink">Often bought with</h3>
+                  <div className="scrollbar-none mt-2 flex snap-x gap-3 overflow-x-auto px-5 pb-1">
+                    {recommendations.map((product) => (
+                      <MostOrderedCard
+                        key={product.id}
+                        product={product}
+                        onSelect={handleSelectRecommendation}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="shrink-0 border-t border-hg-brown/10 bg-white px-5 py-4">

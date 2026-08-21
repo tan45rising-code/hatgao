@@ -1,5 +1,6 @@
 "use client";
 
+import { Flame } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatCents } from "@/lib/money";
 import type { PublicProduct } from "@/server/menu/public-menu";
@@ -8,9 +9,14 @@ import { ProductPhoto } from "./product-photo";
 export function ProductCard({
   product,
   onSelect,
+  isPopular = false,
 }: {
   product: PublicProduct;
   onSelect: (product: PublicProduct) => void;
+  /** Whether this product is in the Most Ordered ranking — omit (or pass
+   * false) anywhere that's already implied, e.g. inside the Most Ordered
+   * carousel/See-all view itself, where every card would show it. */
+  isPopular?: boolean;
 }) {
   const soldOut = !product.isAvailable;
 
@@ -43,6 +49,12 @@ export function ProductCard({
         )}
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-hg-ink">{formatCents(product.priceCents)}</span>
+          {isPopular && (
+            <span className="flex items-center gap-1 rounded-full bg-hg-red/10 px-2 py-0.5 text-[11px] font-medium text-hg-red">
+              <Flame className="h-3 w-3" />
+              Popular
+            </span>
+          )}
           {soldOut && (
             <span className="rounded-full bg-hg-ink/10 px-2 py-0.5 text-[11px] font-medium text-hg-brown">
               Sold out
