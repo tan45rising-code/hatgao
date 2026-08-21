@@ -1,8 +1,9 @@
 import { getPublicMenu } from "@/server/menu/public-menu";
+import { getMostOrderedProducts } from "@/server/menu/most-ordered";
 import { MenuBrowser } from "@/components/customer/menu-browser";
 
 export default async function MenuPage() {
-  const categories = await getPublicMenu();
+  const [categories, mostOrdered] = await Promise.all([getPublicMenu(), getMostOrderedProducts()]);
 
   if (categories.length === 0) {
     return (
@@ -14,5 +15,5 @@ export default async function MenuPage() {
     );
   }
 
-  return <MenuBrowser categories={categories} />;
+  return <MenuBrowser categories={categories} mostOrdered={mostOrdered} />;
 }

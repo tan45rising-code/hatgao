@@ -3,14 +3,25 @@
 import { useState } from "react";
 import type { PublicCategory, PublicProduct } from "@/server/menu/public-menu";
 import { CategoryNav, categorySectionId } from "./category-nav";
+import { MostOrderedSection } from "./most-ordered-section";
 import { ProductCard } from "./product-card";
 import { ProductDetailSheet } from "./product-detail-sheet";
 
-export function MenuBrowser({ categories }: { categories: PublicCategory[] }) {
+export function MenuBrowser({
+  categories,
+  mostOrdered,
+}: {
+  categories: PublicCategory[];
+  mostOrdered: PublicProduct[];
+}) {
   const [selectedProduct, setSelectedProduct] = useState<PublicProduct | null>(null);
 
   return (
     <>
+      <div className="mx-auto max-w-3xl">
+        <MostOrderedSection products={mostOrdered} onSelect={setSelectedProduct} />
+      </div>
+
       <CategoryNav categories={categories} />
 
       <main className="mx-auto max-w-3xl px-3 pb-28 pt-4 sm:px-6">

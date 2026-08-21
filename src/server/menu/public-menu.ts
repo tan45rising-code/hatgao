@@ -21,6 +21,7 @@
  * once there's an actual order to price.
  */
 
+import type { Prisma, Product } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { syncExpiredAvailability } from "./sync-availability";
 
@@ -66,6 +67,65 @@ export type PublicCategory = {
   products: PublicProduct[];
 };
 
+/** Shared between this file and most-ordered.ts, which fetches products
+ * outside the category tree (top sellers, not grouped by category) but
+ * needs to render them through the same PublicProduct/ProductCard shape —
+ * duplicating this include-and-map pair for a second query would be an
+ * easy place for the two lists to quietly drift apart. */
+export const productIncludeForPublicMenu = {
+  modifierGroups: {
+    include: {
+      group: {
+        include: {
+          modifiers: {
+            where: { deletedAt: null, isAvailable: true },
+            orderBy: { sortOrder: "asc" },
+          },
+        },
+      },
+    },
+  },
+} satisfies Prisma.ProductInclude;
+
+type ProductWithModifiers = Product & {
+  modifierGroups: Prisma.ProductGetPayload<{ include: typeof productIncludeForPublicMenu }>["modifierGroups"];
+};
+
+export function toPublicProduct(product: ProductWithModifiers): PublicProduct {
+  return {
+    id: product.id,
+    menuNumber: product.menuNumber,
+    name: product.name,
+    slug: product.slug,
+    description: product.description,
+    priceCents: product.priceCents,
+    vatRateBps: product.vatRateBps,
+    imageUrl: product.imageUrl,
+    imageAlt: product.imageAlt,
+    deliveryEligible: product.deliveryEligible,
+    pickupEligible: product.pickupEligible,
+    containsAlcohol: product.containsAlcohol,
+    isAvailable: product.isAvailable,
+    modifierGroups: product.modifierGroups
+      .filter((pmg) => pmg.group.isActive && pmg.group.deletedAt === null)
+      .sort((a, b) => a.group.sortOrder - b.group.sortOrder)
+      .map((pmg) => ({
+        id: pmg.group.id,
+        name: pmg.group.name,
+        description: pmg.group.description,
+        minSelect: pmg.group.minSelect,
+        maxSelect: pmg.group.maxSelect,
+        isRequired: pmg.group.isRequired,
+        modifiers: pmg.group.modifiers.map((m) => ({
+          id: m.id,
+          name: m.name,
+          priceDeltaCents: m.priceDeltaCents,
+          isDefault: m.isDefault,
+        })),
+      })),
+  };
+}
+
 export async function getPublicMenu(): Promise<PublicCategory[]> {
   await syncExpiredAvailability();
 
@@ -78,20 +138,7 @@ export async function getPublicMenu(): Promise<PublicCategory[]> {
         // still render (see the type/module doc comment), just flagged.
         where: { deletedAt: null, isActive: true },
         orderBy: { sortOrder: "asc" },
-        include: {
-          modifierGroups: {
-            include: {
-              group: {
-                include: {
-                  modifiers: {
-                    where: { deletedAt: null, isAvailable: true },
-                    orderBy: { sortOrder: "asc" },
-                  },
-                },
-              },
-            },
-          },
-        },
+        include: productIncludeForPublicMenu,
       },
     },
   });
@@ -102,38 +149,7 @@ export async function getPublicMenu(): Promise<PublicCategory[]> {
       name: category.name,
       slug: category.slug,
       description: category.description,
-      products: category.products.map((product) => ({
-        id: product.id,
-        menuNumber: product.menuNumber,
-        name: product.name,
-        slug: product.slug,
-        description: product.description,
-        priceCents: product.priceCents,
-        vatRateBps: product.vatRateBps,
-        imageUrl: product.imageUrl,
-        imageAlt: product.imageAlt,
-        deliveryEligible: product.deliveryEligible,
-        pickupEligible: product.pickupEligible,
-        containsAlcohol: product.containsAlcohol,
-        isAvailable: product.isAvailable,
-        modifierGroups: product.modifierGroups
-          .filter((pmg) => pmg.group.isActive && pmg.group.deletedAt === null)
-          .sort((a, b) => a.group.sortOrder - b.group.sortOrder)
-          .map((pmg) => ({
-            id: pmg.group.id,
-            name: pmg.group.name,
-            description: pmg.group.description,
-            minSelect: pmg.group.minSelect,
-            maxSelect: pmg.group.maxSelect,
-            isRequired: pmg.group.isRequired,
-            modifiers: pmg.group.modifiers.map((m) => ({
-              id: m.id,
-              name: m.name,
-              priceDeltaCents: m.priceDeltaCents,
-              isDefault: m.isDefault,
-            })),
-          })),
-      })),
+      products: category.products.map(toPublicProduct),
     }))
     // A category with nothing active in it at all (not even sold-out
     // items — those still render) is dead weight in the nav — drop it
