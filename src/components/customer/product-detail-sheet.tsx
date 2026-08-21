@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -73,6 +73,12 @@ export function ProductDetailSheet({
   // Just the photo+details crossfade for a same-sheet product swap —
   // independent of `visible`, which only handles opening/closing.
   const [contentVisible, setContentVisible] = useState(true);
+  // The scrollable content div is the same DOM node across a swap (the
+  // sheet never remounts), so it keeps whatever scroll position it had
+  // for the PREVIOUS product — without resetting it, swapping to a new
+  // product from partway down "Often bought with" landed you partway
+  // down the new product's content too, instead of at the photo.
+  const contentRef = useRef<HTMLDivElement>(null);
 
   function showProduct(next: PublicProduct) {
     setDisplayedProduct(next);
@@ -80,6 +86,7 @@ export function ProductDetailSheet({
     setQuantity(1);
     setNotes("");
     setContentVisible(true);
+    if (contentRef.current) contentRef.current.scrollTop = 0;
   }
 
   useEffect(() => {
@@ -242,6 +249,7 @@ export function ProductDetailSheet({
         </div>
 
         <div
+          ref={contentRef}
           className={cn(
             "flex-1 overflow-y-auto px-5 py-4 transition-all duration-150 ease-out",
             contentVisible ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
