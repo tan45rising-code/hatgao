@@ -4,10 +4,15 @@
  *
  * Deliberately narrower than the admin product query
  * (`src/app/admin/(protected)/menu/products/page.tsx`): customers only ever
- * see active, in-stock, non-deleted items. Availability is self-healing the
- * same way the admin list is — see `syncExpiredAvailability` — so this is
- * now the SECOND call site for it, not the only one (the doc comment on
- * that function predates this file).
+ * see active, non-deleted items — but that includes sold-out/unavailable
+ * ones, shown with `isAvailable: false` so the UI can render them
+ * dimmed with a "Sold out" badge instead of hiding them outright (the
+ * old behavior — dropping them from the query entirely — meant a
+ * regular customer had no idea a dish existed at all once it ran out).
+ * Availability is self-healing the same way the admin list is — see
+ * `syncExpiredAvailability` — so this is now the SECOND call site for
+ * it, not the only one (the doc comment on that function predates this
+ * file).
  *
  * No fulfilment-type (delivery/pickup) filtering happens here. Browsing
  * shows everything; eligibility (e.g. "beer can't be delivered") is a
@@ -49,6 +54,7 @@ export type PublicProduct = {
   deliveryEligible: boolean;
   pickupEligible: boolean;
   containsAlcohol: boolean;
+  isAvailable: boolean;
   modifierGroups: PublicModifierGroup[];
 };
 
@@ -68,7 +74,9 @@ export async function getPublicMenu(): Promise<PublicCategory[]> {
     orderBy: { sortOrder: "asc" },
     include: {
       products: {
-        where: { deletedAt: null, isActive: true, isAvailable: true },
+        // isAvailable is NOT filtered here — a sold-out product should
+        // still render (see the type/module doc comment), just flagged.
+        where: { deletedAt: null, isActive: true },
         orderBy: { sortOrder: "asc" },
         include: {
           modifierGroups: {
@@ -107,6 +115,7 @@ export async function getPublicMenu(): Promise<PublicCategory[]> {
         deliveryEligible: product.deliveryEligible,
         pickupEligible: product.pickupEligible,
         containsAlcohol: product.containsAlcohol,
+        isAvailable: product.isAvailable,
         modifierGroups: product.modifierGroups
           .filter((pmg) => pmg.group.isActive && pmg.group.deletedAt === null)
           .sort((a, b) => a.group.sortOrder - b.group.sortOrder)
@@ -126,7 +135,8 @@ export async function getPublicMenu(): Promise<PublicCategory[]> {
           })),
       })),
     }))
-    // A category with every product sold out (or none at all) is dead
-    // weight in the nav — drop it rather than show an empty section.
+    // A category with nothing active in it at all (not even sold-out
+    // items — those still render) is dead weight in the nav — drop it
+    // rather than show an empty section.
     .filter((category) => category.products.length > 0);
 }

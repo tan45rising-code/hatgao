@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import { formatCents } from "@/lib/money";
 import type { PublicProduct } from "@/server/menu/public-menu";
 import { ProductPhoto } from "./product-photo";
@@ -11,11 +12,22 @@ export function ProductCard({
   product: PublicProduct;
   onSelect: (product: PublicProduct) => void;
 }) {
+  const soldOut = !product.isAvailable;
+
+  // A sold-out item still shows (see public-menu.ts) but isn't a real
+  // button — nothing useful happens if you tap it, so it shouldn't look
+  // or behave like one.
+  const Tag = soldOut ? "div" : "button";
+
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(product)}
-      className="group flex w-full items-stretch gap-3 rounded-xl border border-hg-brown/10 bg-white p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md sm:gap-4 sm:p-4"
+    <Tag
+      type={soldOut ? undefined : "button"}
+      onClick={soldOut ? undefined : () => onSelect(product)}
+      aria-disabled={soldOut || undefined}
+      className={cn(
+        "group flex w-full items-stretch gap-3 rounded-xl border border-hg-brown/10 bg-white p-3 text-left shadow-sm transition-all sm:gap-4 sm:p-4",
+        soldOut ? "opacity-70" : "hover:-translate-y-0.5 hover:shadow-md",
+      )}
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
@@ -29,8 +41,13 @@ export function ProductCard({
         {product.description && (
           <p className="mt-1 line-clamp-2 text-sm text-hg-brown/70">{product.description}</p>
         )}
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-hg-ink">{formatCents(product.priceCents)}</span>
+          {soldOut && (
+            <span className="rounded-full bg-hg-ink/10 px-2 py-0.5 text-[11px] font-medium text-hg-brown">
+              Sold out
+            </span>
+          )}
           {product.containsAlcohol && (
             <span className="rounded-full bg-hg-gold/20 px-2 py-0.5 text-[11px] font-medium text-hg-brown">
               18+ · collection only
@@ -38,11 +55,20 @@ export function ProductCard({
           )}
         </div>
       </div>
-      <ProductPhoto
-        src={product.imageUrl}
-        alt={product.imageAlt ?? product.name}
-        className="h-20 w-20 shrink-0 rounded-lg sm:h-24 sm:w-24"
-      />
-    </button>
+      <div className="relative h-20 w-20 shrink-0 sm:h-24 sm:w-24">
+        <ProductPhoto
+          src={product.imageUrl}
+          alt={product.imageAlt ?? product.name}
+          className={cn("h-full w-full rounded-lg", soldOut && "grayscale")}
+        />
+        {soldOut && (
+          <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-hg-ink/40">
+            <span className="rounded-full bg-white/95 px-2 py-0.5 text-[11px] font-semibold text-hg-ink">
+              Sold out
+            </span>
+          </div>
+        )}
+      </div>
+    </Tag>
   );
 }
