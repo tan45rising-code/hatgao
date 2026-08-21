@@ -35,7 +35,7 @@ export function ProductDetailSheet({
   product: PublicProduct | null;
   onClose: () => void;
 }) {
-  const { addLine, openDrawer } = useCart();
+  const { addLine } = useCart();
   const [selections, setSelections] = useState<Record<string, Set<string>>>({});
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState("");
@@ -133,7 +133,6 @@ export function ProductDetailSheet({
       })),
     });
     handleClose();
-    openDrawer();
   }
 
   if (!product) return null;

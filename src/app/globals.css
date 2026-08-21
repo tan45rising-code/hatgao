@@ -1,7 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
+  /* Matches --color-hg-bg below — kept as a separate token because this
+     one is what `body` actually uses (see the dark-mode note further
+     down), while --color-hg-bg is the customer site's explicit utility
+     class. Same value, different job. */
+  --background: #fbf6ef;
   --foreground: #171717;
 
   /* Hat Gao brand palette — from the restaurant's logo/palette, not to be
@@ -31,13 +35,13 @@
   --font-script: var(--font-alex-brush);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* No dark theme, by design — neither the customer site nor the admin
+   dashboard has one, so `body`'s background needs to stay a light,
+   brand-appropriate color even when the OS is in dark mode. Without this,
+   `body`'s background defaulted to near-black under
+   prefers-color-scheme: dark, which is invisible in normal use but
+   flashes through during an iOS Safari rubber-band overscroll — body
+   sits behind every page's own content wrapper. */
 body {
   background: var(--background);
   color: var(--foreground);
