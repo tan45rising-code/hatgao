@@ -25,7 +25,7 @@ import { recordAuditLog } from "@/server/audit/log";
 import { slugify } from "@/lib/slug";
 import { parsePriceToCents } from "@/lib/money";
 import { nextLocalMidnightUtc } from "@/server/menu/availability";
-import { processAndUploadProductImage, deleteProductImage, InvalidImageError } from "@/server/menu/product-image";
+import { reencodeStagedImage, deleteProductImage, InvalidImageError } from "@/server/menu/product-image";
 import { revalidatePublicMenu } from "@/server/menu/revalidate-public-menu";
 
 function checkboxValue(formData: FormData, name: string): boolean {
@@ -71,12 +71,20 @@ async function syncModifierGroups(productId: string, groupIds: string[]) {
   });
 }
 
-/** A `<input type="file">` with nothing chosen still submits a zero-byte File — treat that as "no upload". */
+/**
+ * The photo itself never reaches this Server Action — the browser
+ * uploads it directly to Blob storage (product-photo-field.tsx) and the
+ * form only carries the resulting URL, a plain string field. That's a
+ * deliberate workaround for Vercel's ~4.5MB Serverless Function body cap,
+ * not an optional nicety — see src/server/menu/product-image.ts for the
+ * full explanation. `reencodeStagedImage` is what actually validates the
+ * bytes behind that URL.
+ */
 async function extractUploadedImageUrl(formData: FormData, errorRedirectPath: string): Promise<string | null> {
-  const file = formData.get("image");
-  if (!(file instanceof File) || file.size === 0) return null;
+  const stagedUrl = formData.get("stagedImageUrl");
+  if (typeof stagedUrl !== "string" || stagedUrl.length === 0) return null;
   try {
-    return await processAndUploadProductImage(file);
+    return await reencodeStagedImage(stagedUrl);
   } catch (err) {
     if (err instanceof InvalidImageError) {
       redirect(`${errorRedirectPath}?error=bad_image`);

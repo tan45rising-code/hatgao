@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import type { Category, ModifierGroup, Product } from "@prisma/client";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -7,6 +10,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { formatCents } from "@/lib/money";
+import { ProductPhotoField } from "./product-photo-field";
 
 type ProductFormProps = {
   action: (formData: FormData) => void | Promise<void>;
@@ -31,6 +35,7 @@ export const PRODUCT_FORM_ERROR_MESSAGES: Record<string, string> = {
 
 export function ProductForm({ action, categories, modifierGroups, product, errorMessage }: ProductFormProps) {
   const attachedGroupIds = new Set(product?.modifierGroups.map((g) => g.groupId) ?? []);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   return (
     <form action={action} className="max-w-2xl space-y-6">
@@ -102,32 +107,11 @@ export function ProductForm({ action, categories, modifierGroups, product, error
         </div>
       </div>
 
-      <div className="rounded-md border border-neutral-200 bg-white p-4">
-        <p className="mb-3 text-sm font-semibold text-neutral-900">Photo</p>
-        {product?.imageUrl && (
-          <div className="mb-3 flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element -- remote Blob URL, not a local optimizable asset */}
-            <img
-              src={product.imageUrl}
-              alt={product.name}
-              className="h-20 w-20 rounded-md border border-neutral-200 object-cover"
-            />
-            <label className="flex items-center gap-2 text-sm text-neutral-700">
-              <Checkbox name="removePhoto" />
-              Remove this photo
-            </label>
-          </div>
-        )}
-        <Label htmlFor="image">{product?.imageUrl ? "Replace photo" : "Upload a photo"}</Label>
-        <input
-          id="image"
-          name="image"
-          type="file"
-          accept="image/*"
-          className="block w-full text-sm text-neutral-700 file:mr-3 file:rounded-md file:border-0 file:bg-neutral-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-neutral-800"
-        />
-        <p className="mt-1 text-xs text-neutral-500">JPG, PNG or similar. Resized automatically, up to 8MB.</p>
-      </div>
+      <ProductPhotoField
+        currentImageUrl={product?.imageUrl}
+        productName={product?.name ?? "Product photo"}
+        onBusyChange={setPhotoBusy}
+      />
 
       <div className="space-y-2 rounded-md border border-neutral-200 bg-white p-4">
         <p className="text-sm font-semibold text-neutral-900">Fulfilment &amp; contents</p>
@@ -200,7 +184,9 @@ export function ProductForm({ action, categories, modifierGroups, product, error
       </details>
 
       <div className="flex gap-2">
-        <Button type="submit">{product ? "Save" : "Create product"}</Button>
+        <Button type="submit" disabled={photoBusy}>
+          {photoBusy ? "Uploading photo…" : product ? "Save" : "Create product"}
+        </Button>
         <Link href="/admin/menu/products" className={buttonVariants({ variant: "secondary" })}>
           Cancel
         </Link>
