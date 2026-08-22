@@ -61,7 +61,12 @@ function nextFrame(cb: () => void): () => void {
 }
 
 const CROSSFADE_MS = 150;
-const CLOSE_MS = 200;
+// Matches the panel's own "duration-300" transform transition below, and
+// use-drag-to-close.ts's SETTLE_MS — all three have to agree, or a close
+// either unmounts the content mid-slide (too short) or leaves the panel
+// sitting fully off-screen for a beat before finally disappearing (too
+// long, reads as unresponsive rather than smooth).
+const CLOSE_MS = 300;
 
 export function ProductDetailSheet({
   product,
@@ -276,7 +281,7 @@ export function ProductDetailSheet({
         style={dragging ? { transform: `translateY(${dragOffset}px)` } : undefined}
         className={cn(
           "flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white sm:max-w-lg sm:rounded-2xl",
-          (settling || !dragging) && "transition-transform duration-200",
+          (settling || !dragging) && "transition-transform duration-300 ease-out",
           !dragging && (visible ? "translate-y-0" : "translate-y-full sm:translate-y-4 sm:opacity-0"),
         )}
       >

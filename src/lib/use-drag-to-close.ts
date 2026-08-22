@@ -3,7 +3,18 @@
 import { useCallback, useRef, useState } from "react";
 
 const OFFSCREEN_PX = 1200; // comfortably past any real viewport dimension
-const SETTLE_MS = 200; // matches the CSS sheets/drawer normally close on
+const SETTLE_MS = 300; // matches the CSS sheets/drawer normally close on — see the "duration-300" classes alongside every `settling || !dragging` check
+
+/** A slow, deliberate drag only closes once it's gone this deep. */
+const DEFAULT_DISTANCE_THRESHOLD_PX = 120;
+/** A fast flick closes with much less distance than that — but still
+ * needs to have moved at least this far, so a stray touchmove firing
+ * right at touchstart (near-zero distance, so noisy velocity math) can
+ * never read as a fling. */
+const MIN_FLING_DISTANCE_PX = 24;
+/** px/ms in the closing direction. ~500px/s — comfortably past anything
+ * a slow, deliberate drag produces, comfortably under a real flick. */
+const FLING_VELOCITY_PX_PER_MS = 0.5;
 
 /**
  * Swipe-to-dismiss for a sheet/drawer, usable from two kinds of zones:
@@ -23,6 +34,13 @@ const SETTLE_MS = 200; // matches the CSS sheets/drawer normally close on
  *     on product swap), merge the two refs (see src/lib/utils.ts —
  *     mergeRefs) rather than only attaching one.
  *
+ *     It's also fine to attach `contentRef` to a zone that never actually
+ *     scrolls (CartDrawer's empty-cart state, which has no list to
+ *     protect) — `scrollTop` on a non-scrolling element just reads 0
+ *     forever, so it behaves like an immediate-claim zone, but still one
+ *     that only closes on a genuine downward drag rather than eating
+ *     every touch unconditionally.
+ *
  * Both are plain callback refs, not spreadable JSX props, and both wire
  * up native `addEventListener(..., { passive: false })` calls instead of
  * JSX `onTouchMove` — that distinction matters: React registers
@@ -36,6 +54,16 @@ const SETTLE_MS = 200; // matches the CSS sheets/drawer normally close on
  *
  * `axis: "y"` is for a bottom sheet (drag DOWN to close — ProductDetailSheet,
  * ProductListSheet, CartDrawer).
+ *
+ * Closing on release is distance-OR-velocity, not distance alone: a slow
+ * drag has to go a genuine `threshold` px deep, but a fast flick — this is
+ * what "swipe down hard and fast" actually measures, px moved per ms,
+ * sampled continuously during the drag rather than derived from
+ * start/end alone (which a pause-then-flick could fool) — closes off a
+ * much shorter, `MIN_FLING_DISTANCE_PX` distance. Without the velocity
+ * half, `threshold` alone was easy to cross by accident on any moderately
+ * deliberate drag; without the distance floor, a single noisy touchmove
+ * right at touchstart could read as an enormous, meaningless velocity.
  *
  * On release, `finish()` doesn't just snap back to 0 — it keeps
  * animating the SAME offset (with a transition now, since the finger's
@@ -55,30 +83,72 @@ const SETTLE_MS = 200; // matches the CSS sheets/drawer normally close on
  * value — React batches state updates, so a fast flick can fire
  * touchmove-then-touchend before a re-render ever hands the handler a
  * closure with the latest offset, making the state value read there
- * potentially one event stale. The ref is always current.
+ * potentially one event stale. The ref is always current. Same reasoning
+ * covers the velocity ref.
  */
-export function useDragToClose(axis: "x" | "y", onClose: () => void, threshold = 80) {
+export function useDragToClose(axis: "x" | "y", onClose: () => void, threshold = DEFAULT_DISTANCE_THRESHOLD_PX) {
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [settling, setSettling] = useState(false);
   const offsetRef = useRef(0);
 
+  // Velocity, in px/ms along the drag axis (positive = moving in the
+  // closing direction), sampled on every touchmove that's actually being
+  // treated as a close-drag. Shared between the header and content zones
+  // — a given touch only ever engages one of them, so one tracker is
+  // enough.
+  const lastSample = useRef<{ pos: number; time: number } | null>(null);
+  const velocityRef = useRef(0);
+
   function clientPos(e: TouchEvent): number {
     return axis === "y" ? e.touches[0]!.clientY : e.touches[0]!.clientX;
   }
 
+  function recordVelocitySample(pos: number) {
+    const now = performance.now();
+    const prev = lastSample.current;
+    if (prev) {
+      const dt = now - prev.time;
+      // A zero (or negative, across some platforms' timer quirks) dt
+      // sample is a duplicate/coalesced event, not real motion — skip it
+      // rather than dividing by ~0 and reading a spurious huge velocity.
+      if (dt > 0) velocityRef.current = (pos - prev.pos) / dt;
+    }
+    lastSample.current = { pos, time: now };
+  }
+
+  function resetVelocity() {
+    lastSample.current = null;
+    velocityRef.current = 0;
+  }
+
   function applyOffset(next: number) {
     const clamped = Math.max(0, next);
+    // Skip the state update once we're already resting at 0 — this
+    // matters, not just as a micro-optimization: once a scrollable
+    // content zone has been "claimed" (tracking.current below), every
+    // remaining touchmove of a long scroll gesture — even one headed
+    // further INTO the list, which this hook has nothing to do with —
+    // was still calling this on every single event, forcing a re-render
+    // of the whole sheet/drawer dozens of times a second. That's what
+    // made a fast swipe through "Often bought with"/"Recommended for
+    // you" look like it was stuttering/snapping instead of scrolling
+    // smoothly — not the scroll itself, which the browser handles
+    // natively, but this hook uselessly re-rendering alongside it.
+    if (clamped === 0 && offsetRef.current === 0) return;
     offsetRef.current = clamped;
     setOffset(clamped);
   }
 
   function finish() {
-    const closing = offsetRef.current > threshold;
+    const distance = offsetRef.current;
+    const closing =
+      distance > threshold || (distance > MIN_FLING_DISTANCE_PX && velocityRef.current > FLING_VELOCITY_PX_PER_MS);
     const settleTo = closing ? OFFSCREEN_PX : 0;
     setSettling(true);
     offsetRef.current = settleTo;
     setOffset(settleTo);
+    resetVelocity();
     if (closing) onClose();
     window.setTimeout(() => {
       setSettling(false);
@@ -93,6 +163,7 @@ export function useDragToClose(axis: "x" | "y", onClose: () => void, threshold =
     setDragging(false);
     offsetRef.current = 0;
     setOffset(0);
+    resetVelocity();
   }
 
   // ---- header/photo zone -----------------------------------------------
@@ -106,12 +177,15 @@ export function useDragToClose(axis: "x" | "y", onClose: () => void, threshold =
 
     function onTouchStart(e: TouchEvent) {
       headerStart.current = clientPos(e);
+      resetVelocity();
       setDragging(true);
     }
     function onTouchMove(e: TouchEvent) {
       if (headerStart.current === null) return;
       e.preventDefault();
-      applyOffset(clientPos(e) - headerStart.current);
+      const pos = clientPos(e);
+      recordVelocitySample(pos);
+      applyOffset(pos - headerStart.current);
     }
     function onTouchEnd() {
       headerStart.current = null;
@@ -152,6 +226,7 @@ export function useDragToClose(axis: "x" | "y", onClose: () => void, threshold =
     function onTouchStart(e: TouchEvent) {
       contentStart.current = clientPos(e);
       tracking.current = false;
+      resetVelocity();
     }
     function onTouchMove(e: TouchEvent) {
       if (contentStart.current === null) return;
@@ -169,10 +244,12 @@ export function useDragToClose(axis: "x" | "y", onClose: () => void, threshold =
         // Dragging back toward/past the start while "at the top" — not a
         // close attempt (and there's nothing to scroll either way,
         // scrollTop's already 0). Just hold at 0 rather than let it go
-        // negative.
+        // negative. applyOffset already no-ops once settled at 0, so this
+        // doesn't re-render on every event of a long scroll.
         applyOffset(0);
         return;
       }
+      recordVelocitySample(pos);
       e.preventDefault(); // claimed — don't also let the page rubber-band/refresh
       applyOffset(delta);
     }

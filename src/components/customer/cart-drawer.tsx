@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ShoppingBag, Trash2, X } from "lucide-react";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -37,6 +37,24 @@ export function CartDrawer({
     [cart, allProducts, popularProductIds],
   );
   const preview = recommendations.slice(0, PREVIEW_COUNT);
+
+  // Locks the page behind the drawer, same as ProductDetailSheet and
+  // ProductListSheet — this drawer was the one place that didn't, and it
+  // showed: swiping down from a zone this component doesn't specifically
+  // instrument (the empty-cart state before the fix below, or the fixed
+  // "Estimated total" footer, which never scrolls and was never meant to)
+  // fell straight through to the real page underneath. With the body
+  // still scrollable, that's not a no-op — it's a live touchmove on the
+  // actual menu page, which is what dragged its scroll position around
+  // (and, at the very top of that page, is exactly what native
+  // pull-to-refresh treats as a pull).
+  useEffect(() => {
+    if (!isDrawerOpen) return;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isDrawerOpen]);
 
   function handleSelectRecommendation(product: PublicProduct) {
     // Leaving the drawer to look at a recommended item, rather than
@@ -78,7 +96,7 @@ export function CartDrawer({
         style={dragging ? { transform: `translateY(${dragOffset}px)` } : undefined}
         className={cn(
           "absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-hg-bg shadow-xl",
-          (settling || !dragging) && "transition-transform duration-200",
+          (settling || !dragging) && "transition-transform duration-300 ease-out",
           !dragging && (isDrawerOpen ? "translate-x-0" : "translate-x-full"),
         )}
       >
@@ -98,7 +116,15 @@ export function CartDrawer({
         </div>
 
         {cart.lines.length === 0 ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+          // Same close-drag zone as the real cart list below (dragContentRef)
+          // even though there's nothing to scroll here — without it, a swipe
+          // starting in this empty area wasn't claimed by anything, and fell
+          // through to the page behind the (now correctly scroll-locked)
+          // drawer.
+          <div
+            ref={dragContentRef}
+            className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center"
+          >
             <ShoppingBag className="h-10 w-10 text-hg-brown/30" strokeWidth={1.5} />
             <p className="text-sm text-hg-brown/60">Your cart is empty — add something tasty from the menu.</p>
           </div>

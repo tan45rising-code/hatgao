@@ -4,11 +4,23 @@ import { useCallback, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const DELETE_THRESHOLD = 80;
+/** A slow, deliberate swipe only deletes once it's gone this far left. */
+const DELETE_DISTANCE_THRESHOLD_PX = 120;
+/** A fast flick deletes with much less distance than that — but still
+ * needs to have moved at least this far first, so a stray touchmove right
+ * at touchstart (near-zero distance, so noisy velocity math) can never
+ * read as a fling. Same reasoning as use-drag-to-close.ts, which this
+ * mirrors. */
+const MIN_FLING_DISTANCE_PX = 24;
+/** px/ms, leftward. ~500px/s — comfortably past a slow drag, comfortably
+ * under a real flick. */
+const FLING_VELOCITY_PX_PER_MS = 0.5;
 const OFFSCREEN_PX = 400;
-/** Matches the timeout below — the swipe-away animation needs to finish
- * before the underlying cart data actually changes and this row unmounts. */
-const REMOVE_ANIMATION_MS = 180;
+/** Fires a little before the "duration-300" slide-away transition below
+ * actually finishes — the row is already essentially off-screen by then,
+ * and waiting the full duration just makes the actual removal feel laggy
+ * rather than adding anything visible. */
+const REMOVE_ANIMATION_MS = 260;
 
 /**
  * Swipe-left-to-delete for a cart line — the same list still keeps its
@@ -18,6 +30,16 @@ const REMOVE_ANIMATION_MS = 180;
  * the cart list is never mistaken for a delete swipe — only a gesture
  * that starts out clearly more horizontal than vertical claims the touch
  * (calls preventDefault/stopPropagation) at all.
+ *
+ * Deleting on release is distance-OR-velocity, not distance alone — same
+ * reasoning as use-drag-to-close.ts's `finish()`: a slow drag has to go a
+ * genuine `DELETE_DISTANCE_THRESHOLD_PX` deep, but a fast flick closes off
+ * a much shorter distance, measured as real px/ms sampled continuously
+ * during the drag rather than derived from start/end alone. Without the
+ * velocity half, the threshold alone was easy to cross by accident on any
+ * moderately deliberate swipe; without the distance floor, a single noisy
+ * touchmove right at touchstart could read as an enormous, meaningless
+ * velocity.
  *
  * Listeners are attached via a callback ref + native addEventListener,
  * not JSX onTouchMove — React registers JSX-bound touchmove handlers as
@@ -40,6 +62,16 @@ export function SwipeableCartLine({
   // see the matching comment in use-drag-to-close.ts for why the state
   // value alone can be one event stale under React's render batching.
   const dragXRef = useRef(0);
+  // px/ms, positive = moving left (toward delete) — sampled on every
+  // touchmove once the gesture's claimed as horizontal. Same reasoning as
+  // use-drag-to-close.ts's velocityRef.
+  const lastSample = useRef<{ x: number; time: number } | null>(null);
+  const velocityRef = useRef(0);
+
+  function resetVelocity() {
+    lastSample.current = null;
+    velocityRef.current = 0;
+  }
 
   function reset() {
     dragXRef.current = 0;
@@ -47,6 +79,7 @@ export function SwipeableCartLine({
     setDragging(false);
     start.current = null;
     axis.current = null;
+    resetVelocity();
   }
 
   const cleanup = useRef<(() => void) | null>(null);
@@ -65,6 +98,7 @@ export function SwipeableCartLine({
       const t = e.touches[0]!;
       start.current = { x: t.clientX, y: t.clientY };
       axis.current = null;
+      resetVelocity();
       setDragging(true);
     }
 
@@ -86,15 +120,32 @@ export function SwipeableCartLine({
       // row, and so the browser never reads it as a page scroll/bounce.
       e.stopPropagation();
       e.preventDefault();
+
+      const now = performance.now();
+      const prev = lastSample.current;
+      if (prev) {
+        const dt = now - prev.time;
+        // A zero/negative dt sample is a duplicate/coalesced event, not
+        // real motion — skip it rather than dividing by ~0.
+        if (dt > 0) velocityRef.current = -(t.clientX - prev.x) / dt;
+      }
+      lastSample.current = { x: t.clientX, time: now };
+
       const next = Math.min(0, dx); // left only
       dragXRef.current = next;
       setDragX(next);
     }
 
     function onTouchEnd() {
-      if (axis.current === "x" && dragXRef.current < -DELETE_THRESHOLD) {
+      const distance = -dragXRef.current; // positive px moved left
+      const deleting =
+        axis.current === "x" &&
+        (distance > DELETE_DISTANCE_THRESHOLD_PX ||
+          (distance > MIN_FLING_DISTANCE_PX && velocityRef.current > FLING_VELOCITY_PX_PER_MS));
+      if (deleting) {
         setDragX(-OFFSCREEN_PX);
         setDragging(false);
+        resetVelocity();
         window.setTimeout(() => onDeleteRef.current(), REMOVE_ANIMATION_MS);
         return;
       }
@@ -111,6 +162,7 @@ export function SwipeableCartLine({
       el.removeEventListener("touchend", onTouchEnd);
       el.removeEventListener("touchcancel", reset);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable callback ref by design; internals close over refs/state-setters, both stable (same pattern as use-drag-to-close.ts)
   }, []);
 
   return (
@@ -121,7 +173,7 @@ export function SwipeableCartLine({
       <div
         ref={rowRef}
         style={{ transform: `translateX(${dragX}px)` }}
-        className={cn(!dragging && "transition-transform duration-200 ease-out")}
+        className={cn(!dragging && "transition-transform duration-300 ease-out")}
       >
         {children}
       </div>
