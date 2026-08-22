@@ -54,6 +54,10 @@ export function SwipeableCartLine({
     }
     if (axis.current === "y") return; // vertical scroll — leave it to the list
 
+    // Claimed as a horizontal delete-swipe — stop it here so it doesn't
+    // also reach the cart drawer's own vertical swipe-down-to-close
+    // handler on the list container around this row.
+    e.stopPropagation();
     e.preventDefault();
     const next = Math.min(0, dx); // left only
     dragXRef.current = next;

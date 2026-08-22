@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ShoppingBag, Trash2, X } from "lucide-react";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -46,10 +46,18 @@ export function CartDrawer({
     onSelectProduct(product);
   }
 
-  // Slides in from the right, so "closing" is dragging further right —
-  // scoped to the header, not the scrollable cart list (which uses its
-  // own horizontal swipe, per line, for delete — see SwipeableCartLine).
-  const { offset: dragOffset, dragging, handlers: dragHandlers } = useDragToClose("x", closeDrawer);
+  // Swipe DOWN to close (not right, even though the drawer itself still
+  // slides in from the right) — matches the same gesture as every other
+  // sheet in the app. Available from the header (always) and from within
+  // the scrollable cart list itself (only once scrolled to the top —
+  // contentHandlers backs off otherwise so normal scrolling still works).
+  // Each line's own horizontal swipe-to-delete (SwipeableCartLine) is a
+  // separate, axis-locked gesture that stops this one from ever seeing it.
+  const { offset: dragOffset, dragging, handlers: dragHandlers, contentHandlers } = useDragToClose(
+    "y",
+    closeDrawer,
+  );
+  const listRef = useRef<HTMLDivElement>(null);
 
   return (
     <div
@@ -65,7 +73,7 @@ export function CartDrawer({
         role="dialog"
         aria-modal="true"
         aria-label="Your order"
-        style={dragging ? { transform: `translateX(${dragOffset}px)` } : undefined}
+        style={dragging ? { transform: `translateY(${dragOffset}px)` } : undefined}
         className={cn(
           "absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-hg-bg shadow-xl",
           !dragging && "transition-transform duration-200",
@@ -94,7 +102,11 @@ export function CartDrawer({
           </div>
         ) : (
           <>
-            <div className="flex-1 overflow-y-auto py-4">
+            <div
+              ref={listRef}
+              {...contentHandlers(() => listRef.current?.scrollTop ?? 0)}
+              className="flex-1 overflow-y-auto py-4"
+            >
               <ul className="space-y-4 px-5">
                 {cart.lines.map((line) => (
                   <li key={line.lineId}>

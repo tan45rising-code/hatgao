@@ -205,7 +205,7 @@ export function ProductDetailSheet({
     onClose();
   }
 
-  const { offset: dragOffset, dragging, handlers: dragHandlers } = useDragToClose("y", handleClose);
+  const { offset: dragOffset, dragging, handlers: dragHandlers, contentHandlers } = useDragToClose("y", handleClose);
 
   function toggleModifier(group: PublicModifierGroup, modifierId: string) {
     setSelections((prev) => {
@@ -274,14 +274,12 @@ export function ProductDetailSheet({
           !dragging && (visible ? "translate-y-0" : "translate-y-full sm:translate-y-4 sm:opacity-0"),
         )}
       >
-        {/* Drag handle + photo together are the swipe-down-to-close zone —
-            deliberately not the scrollable content below, so a normal
-            scroll through the modifier list never gets mistaken for a
-            close gesture. */}
+        {/* The photo itself is one swipe-down-to-close zone. The other is
+            the scrollable content below, via contentHandlers — that one
+            only claims the gesture once scrolled to the top, so a normal
+            scroll through the modifier list is never mistaken for a
+            close. */}
         <div className="relative shrink-0" {...dragHandlers}>
-          <div className="flex justify-center pb-1 pt-2">
-            <div className="h-1 w-10 rounded-full bg-hg-brown/20" />
-          </div>
           <div
             className={cn(
               "transition-all duration-150 ease-out",
@@ -308,6 +306,7 @@ export function ProductDetailSheet({
 
         <div
           ref={contentRef}
+          {...contentHandlers(() => contentRef.current?.scrollTop ?? 0)}
           className={cn(
             "flex-1 overflow-y-auto px-5 py-4 transition-all duration-150 ease-out",
             contentVisible ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
