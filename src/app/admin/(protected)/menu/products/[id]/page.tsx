@@ -8,10 +8,10 @@ export default async function EditProductPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; category?: string }>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error, category } = await searchParams;
 
   const [product, categories, modifierGroups] = await Promise.all([
     prisma.product.findUnique({ where: { id }, include: { modifierGroups: true } }),
@@ -25,11 +25,12 @@ export default async function EditProductPage({
     <div>
       <h1 className="mb-6 text-lg font-semibold text-neutral-900">Edit {product.name}</h1>
       <ProductForm
-        action={updateProductAction.bind(null, product.id)}
+        action={updateProductAction.bind(null, product.id, category ?? null)}
         categories={categories}
         modifierGroups={modifierGroups}
         product={product}
         errorMessage={error ? PRODUCT_FORM_ERROR_MESSAGES[error] : undefined}
+        cancelHref={category ? `/admin/menu/products?category=${category}` : "/admin/menu/products"}
       />
     </div>
   );

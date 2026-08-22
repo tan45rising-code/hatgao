@@ -18,6 +18,10 @@ type ProductFormProps = {
   modifierGroups: ModifierGroup[];
   product?: Product & { modifierGroups: { groupId: string }[] };
   errorMessage?: string;
+  /** Where "Cancel" goes back to — the list page's current category
+   * filter, when there is one, so cancelling also returns to the same
+   * filtered view instead of always landing on "all categories". */
+  cancelHref?: string;
 };
 
 const VAT_OPTIONS = [
@@ -33,7 +37,14 @@ export const PRODUCT_FORM_ERROR_MESSAGES: Record<string, string> = {
   upload_failed: "The photo couldn't be uploaded. Everything else was NOT saved — please try again.",
 };
 
-export function ProductForm({ action, categories, modifierGroups, product, errorMessage }: ProductFormProps) {
+export function ProductForm({
+  action,
+  categories,
+  modifierGroups,
+  product,
+  errorMessage,
+  cancelHref = "/admin/menu/products",
+}: ProductFormProps) {
   const attachedGroupIds = new Set(product?.modifierGroups.map((g) => g.groupId) ?? []);
   const [photoBusy, setPhotoBusy] = useState(false);
 
@@ -187,7 +198,7 @@ export function ProductForm({ action, categories, modifierGroups, product, error
         <Button type="submit" disabled={photoBusy}>
           {photoBusy ? "Uploading photo…" : product ? "Save" : "Create product"}
         </Button>
-        <Link href="/admin/menu/products" className={buttonVariants({ variant: "secondary" })}>
+        <Link href={cancelHref} className={buttonVariants({ variant: "secondary" })}>
           Cancel
         </Link>
       </div>

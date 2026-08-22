@@ -31,7 +31,12 @@ export default async function ProductsPage({
     prisma.category.findMany({ where: { deletedAt: null }, orderBy: { sortOrder: "asc" } }),
     prisma.product.findMany({
       where: { deletedAt: null, ...(category ? { categoryId: category } : {}) },
-      orderBy: [{ categoryId: "asc" }, { sortOrder: "asc" }],
+      // "All categories" orders by menu number (lower first) so the list
+      // reads the same way the printed menu does — products without a
+      // menu number yet sort last rather than jumbling in at the front.
+      // A single filtered category keeps its own manually-set sortOrder,
+      // since that's the order staff deliberately arranged within it.
+      orderBy: category ? [{ sortOrder: "asc" }] : [{ menuNumber: { sort: "asc", nulls: "last" } }, { sortOrder: "asc" }],
       include: { category: true },
     }),
   ]);
@@ -124,7 +129,7 @@ export default async function ProductsPage({
                 ) : (
                   <div className="flex items-center gap-2">
                     <Link
-                      href={`/admin/menu/products/${product.id}`}
+                      href={`/admin/menu/products/${product.id}${category ? `?category=${category}` : ""}`}
                       className={buttonVariants({ variant: "secondary", size: "sm" })}
                     >
                       Edit

@@ -55,6 +55,26 @@ async function requireOwner() {
   return session;
 }
 
+/** The list page's current category filter, carried through edit/delete
+ * round-trips so "Save" (or "Cancel", or a delete-confirm) returns the
+ * admin to the same filtered view they started from instead of always
+ * dropping back to "all categories". Bound in from the page — see the
+ * `category` param on products/page.tsx and [id]/page.tsx — never taken
+ * from form input. */
+function productsListPath(category: string | null): string {
+  return category ? `/admin/menu/products?category=${category}` : "/admin/menu/products";
+}
+
+/** Same idea as `productsListPath`, but for redirecting back to the edit
+ * form itself (validation errors) rather than the list. */
+function editProductPath(id: string, category: string | null, error?: string): string {
+  const params = new URLSearchParams();
+  if (category) params.set("category", category);
+  if (error) params.set("error", error);
+  const qs = params.toString();
+  return `/admin/menu/products/${id}${qs ? `?${qs}` : ""}`;
+}
+
 function parseModifierGroupIds(formData: FormData): string[] {
   return formData.getAll("modifierGroupIds").map(String);
 }
@@ -80,18 +100,22 @@ async function syncModifierGroups(productId: string, groupIds: string[]) {
  * full explanation. `reencodeStagedImage` is what actually validates the
  * bytes behind that URL.
  */
-async function extractUploadedImageUrl(formData: FormData, errorRedirectPath: string): Promise<string | null> {
+async function extractUploadedImageUrl(
+  formData: FormData,
+  buildErrorPath: (error: "bad_image" | "upload_failed") => string,
+): Promise<string | null> {
   const stagedUrl = formData.get("stagedImageUrl");
   if (typeof stagedUrl !== "string" || stagedUrl.length === 0) return null;
   try {
     return await reencodeStagedImage(stagedUrl);
   } catch (err) {
-    if (err instanceof InvalidImageError) {
-      redirect(`${errorRedirectPath}?error=bad_image`);
-    }
     // BLOB_READ_WRITE_TOKEN missing/misconfigured, or a transient network
-    // failure talking to Vercel Blob — either way, not the admin's mistake.
-    redirect(`${errorRedirectPath}?error=upload_failed`);
+    // failure talking to Vercel Blob, gets "upload_failed"; a file that
+    // doesn't decode as a real image gets "bad_image". Built via a
+    // callback rather than string concatenation because the edit form's
+    // error path may already carry a `?category=` query string — naively
+    // appending `?error=` would produce an invalid double `?`.
+    redirect(buildErrorPath(err instanceof InvalidImageError ? "bad_image" : "upload_failed"));
   }
 }
 
@@ -107,7 +131,7 @@ export async function createProductAction(formData: FormData): Promise<void> {
     redirect("/admin/menu/products/new?error=alcohol_delivery");
   }
 
-  const imageUrl = await extractUploadedImageUrl(formData, "/admin/menu/products/new");
+  const imageUrl = await extractUploadedImageUrl(formData, (error) => `/admin/menu/products/new?error=${error}`);
 
   const { name, categoryId, menuNumber, description, vatRateBps, prepMinutesOverride, sortOrder } = parsed.data;
 
@@ -145,22 +169,26 @@ export async function createProductAction(formData: FormData): Promise<void> {
   redirect("/admin/menu/products");
 }
 
-export async function updateProductAction(id: string, formData: FormData): Promise<void> {
+/** `category` is the list page's current filter (bound in from the page,
+ * not form input — see the form in [id]/page.tsx), so saving from a
+ * category-filtered view returns to that same filter instead of always
+ * landing back on "all categories". */
+export async function updateProductAction(id: string, category: string | null, formData: FormData): Promise<void> {
   const session = await requireOwner();
   const before = await prisma.product.findUnique({ where: { id } });
-  if (!before) redirect("/admin/menu/products");
+  if (!before) redirect(productsListPath(category));
 
   const parsed = productSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) redirect(`/admin/menu/products/${id}?error=invalid`);
+  if (!parsed.success) redirect(editProductPath(id, category, "invalid"));
 
   const priceCents = parsePriceToCents(parsed.data.price);
   const deliveryEligible = checkboxValue(formData, "deliveryEligible");
   const containsAlcohol = checkboxValue(formData, "containsAlcohol");
   if (containsAlcohol && deliveryEligible) {
-    redirect(`/admin/menu/products/${id}?error=alcohol_delivery`);
+    redirect(editProductPath(id, category, "alcohol_delivery"));
   }
 
-  const uploadedImageUrl = await extractUploadedImageUrl(formData, `/admin/menu/products/${id}`);
+  const uploadedImageUrl = await extractUploadedImageUrl(formData, (error) => editProductPath(id, category, error));
   const removePhoto = checkboxValue(formData, "removePhoto");
   let imageUrl = before.imageUrl;
   if (uploadedImageUrl) {
@@ -209,7 +237,7 @@ export async function updateProductAction(id: string, formData: FormData): Promi
 
   revalidatePath("/admin/menu/products");
   revalidatePublicMenu();
-  redirect("/admin/menu/products");
+  redirect(productsListPath(category));
 }
 
 /** `category` is the list page's current filter (bound in from the page,
@@ -233,7 +261,7 @@ export async function deleteProductAction(id: string, category: string | null): 
 
   revalidatePath("/admin/menu/products");
   revalidatePublicMenu();
-  redirect(category ? `/admin/menu/products?category=${category}` : "/admin/menu/products");
+  redirect(productsListPath(category));
 }
 
 export type AvailabilityStatus = "available" | "unavailable" | "sold_out_today";
