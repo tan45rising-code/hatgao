@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { formatCents } from "@/lib/money";
-import { cn } from "@/lib/utils";
+import { cn, mergeRefs } from "@/lib/utils";
 import { useCart } from "@/lib/cart/cart-context";
 import { getProductPageRecommendations } from "@/lib/cart/recommendations";
 import { useDragToClose } from "@/lib/use-drag-to-close";
@@ -205,7 +205,13 @@ export function ProductDetailSheet({
     onClose();
   }
 
-  const { offset: dragOffset, dragging, handlers: dragHandlers, contentHandlers } = useDragToClose("y", handleClose);
+  const {
+    offset: dragOffset,
+    dragging,
+    settling,
+    headerRef: dragHeaderRef,
+    contentRef: dragContentRef,
+  } = useDragToClose("y", handleClose);
 
   function toggleModifier(group: PublicModifierGroup, modifierId: string) {
     setSelections((prev) => {
@@ -270,16 +276,16 @@ export function ProductDetailSheet({
         style={dragging ? { transform: `translateY(${dragOffset}px)` } : undefined}
         className={cn(
           "flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white sm:max-w-lg sm:rounded-2xl",
-          !dragging && "transition-transform duration-200",
+          (settling || !dragging) && "transition-transform duration-200",
           !dragging && (visible ? "translate-y-0" : "translate-y-full sm:translate-y-4 sm:opacity-0"),
         )}
       >
         {/* The photo itself is one swipe-down-to-close zone. The other is
-            the scrollable content below, via contentHandlers — that one
+            the scrollable content below, via dragContentRef — that one
             only claims the gesture once scrolled to the top, so a normal
             scroll through the modifier list is never mistaken for a
             close. */}
-        <div className="relative shrink-0" {...dragHandlers}>
+        <div className="relative shrink-0" ref={dragHeaderRef}>
           <div
             className={cn(
               "transition-all duration-150 ease-out",
@@ -289,7 +295,7 @@ export function ProductDetailSheet({
             <ProductPhoto
               src={displayedProduct.imageUrl}
               alt={displayedProduct.imageAlt ?? displayedProduct.name}
-              className="h-44 w-full sm:h-56"
+              className="h-52 w-full sm:h-64"
             />
           </div>
           {/* Kept outside the crossfade — closing should never depend on
@@ -305,10 +311,9 @@ export function ProductDetailSheet({
         </div>
 
         <div
-          ref={contentRef}
-          {...contentHandlers(() => contentRef.current?.scrollTop ?? 0)}
+          ref={mergeRefs(contentRef, dragContentRef)}
           className={cn(
-            "flex-1 overflow-y-auto px-5 py-4 transition-all duration-150 ease-out",
+            "flex-1 overflow-y-auto overscroll-contain px-5 py-4 transition-all duration-150 ease-out",
             contentVisible ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
           )}
         >

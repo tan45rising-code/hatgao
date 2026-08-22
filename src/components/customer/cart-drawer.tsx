@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { ShoppingBag, Trash2, X } from "lucide-react";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -50,14 +50,16 @@ export function CartDrawer({
   // slides in from the right) — matches the same gesture as every other
   // sheet in the app. Available from the header (always) and from within
   // the scrollable cart list itself (only once scrolled to the top —
-  // contentHandlers backs off otherwise so normal scrolling still works).
+  // dragContentRef backs off otherwise so normal scrolling still works).
   // Each line's own horizontal swipe-to-delete (SwipeableCartLine) is a
   // separate, axis-locked gesture that stops this one from ever seeing it.
-  const { offset: dragOffset, dragging, handlers: dragHandlers, contentHandlers } = useDragToClose(
-    "y",
-    closeDrawer,
-  );
-  const listRef = useRef<HTMLDivElement>(null);
+  const {
+    offset: dragOffset,
+    dragging,
+    settling,
+    headerRef: dragHeaderRef,
+    contentRef: dragContentRef,
+  } = useDragToClose("y", closeDrawer);
 
   return (
     <div
@@ -76,13 +78,13 @@ export function CartDrawer({
         style={dragging ? { transform: `translateY(${dragOffset}px)` } : undefined}
         className={cn(
           "absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-hg-bg shadow-xl",
-          !dragging && "transition-transform duration-200",
+          (settling || !dragging) && "transition-transform duration-200",
           !dragging && (isDrawerOpen ? "translate-x-0" : "translate-x-full"),
         )}
       >
         <div
           className="flex shrink-0 items-center justify-between border-b border-hg-brown/10 bg-white px-5 py-4"
-          {...dragHandlers}
+          ref={dragHeaderRef}
         >
           <h2 className="font-display text-lg font-semibold text-hg-ink">Your order</h2>
           <button
@@ -102,11 +104,7 @@ export function CartDrawer({
           </div>
         ) : (
           <>
-            <div
-              ref={listRef}
-              {...contentHandlers(() => listRef.current?.scrollTop ?? 0)}
-              className="flex-1 overflow-y-auto py-4"
-            >
+            <div ref={dragContentRef} className="flex-1 overflow-y-auto overscroll-contain py-4">
               <ul className="space-y-4 px-5">
                 {cart.lines.map((line) => (
                   <li key={line.lineId}>

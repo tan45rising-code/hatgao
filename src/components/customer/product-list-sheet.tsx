@@ -84,7 +84,7 @@ export function ProductListSheet({
     };
   }, [rendered, onClose]);
 
-  const { offset: dragOffset, dragging, handlers: dragHandlers } = useDragToClose("y", onClose);
+  const { offset: dragOffset, dragging, settling, headerRef: dragHeaderRef } = useDragToClose("y", onClose);
 
   if (!rendered) return null;
 
@@ -104,14 +104,14 @@ export function ProductListSheet({
         style={dragging ? { transform: `translateY(${dragOffset}px)` } : undefined}
         className={cn(
           "absolute inset-x-0 bottom-0 flex max-h-[90vh] flex-col overflow-hidden rounded-t-2xl bg-hg-bg sm:inset-x-auto sm:left-1/2 sm:top-1/2 sm:max-h-[85vh] sm:w-full sm:max-w-2xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl",
-          !dragging && "transition-transform duration-200",
+          (settling || !dragging) && "transition-transform duration-200",
           !dragging && (visible ? "translate-y-0 sm:scale-100" : "translate-y-full sm:scale-95 sm:opacity-0"),
         )}
       >
         {/* Drag handle + header are the swipe-down-to-close zone — not the
             scrollable grid below, so scrolling the list itself is never
             mistaken for a close gesture. */}
-        <div className="shrink-0 border-b border-hg-brown/10 bg-white" {...dragHandlers}>
+        <div className="shrink-0 border-b border-hg-brown/10 bg-white" ref={dragHeaderRef}>
           <div className="flex justify-center pb-1 pt-2">
             <div className="h-1 w-10 rounded-full bg-hg-brown/20" />
           </div>
@@ -127,7 +127,7 @@ export function ProductListSheet({
             </button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-5">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5">
           {variant === "detailed" ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {products.map((product) => (
