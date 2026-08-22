@@ -6,6 +6,7 @@ import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { useCart } from "@/lib/cart/cart-context";
 import { getProductPageRecommendations } from "@/lib/cart/recommendations";
+import { useDragToClose } from "@/lib/use-drag-to-close";
 import type { PublicModifierGroup, PublicProduct } from "@/server/menu/public-menu";
 import { QuantityStepper } from "@/components/ui/quantity-stepper";
 import { MostOrderedCard } from "./most-ordered-card";
@@ -36,6 +37,27 @@ function groupSatisfied(group: PublicModifierGroup, count: number): boolean {
   if (count > 0 && count < group.minSelect) return false;
   if (count > group.maxSelect) return false;
   return true;
+}
+
+/** Waits two frames instead of one before starting a CSS transition.
+ * A single requestAnimationFrame is the textbook pattern for "let the
+ * browser paint the closed state, then flip to open so the transition
+ * actually animates" — but it's not fully reliable under real-world paint
+ * timing (e.g. an image still decoding). When that single frame gets
+ * coalesced with the state flip, the sheet just snaps open with no
+ * animation instead of sliding in — which is exactly what made tapping a
+ * product's photo feel different from tapping its name: an image mid-
+ * decode was more likely to cost the timing than plain text. Two frames
+ * is the standard, more robust fix. */
+function nextFrame(cb: () => void): () => void {
+  let raf2 = 0;
+  const raf1 = requestAnimationFrame(() => {
+    raf2 = requestAnimationFrame(cb);
+  });
+  return () => {
+    cancelAnimationFrame(raf1);
+    cancelAnimationFrame(raf2);
+  };
 }
 
 const CROSSFADE_MS = 150;
@@ -89,6 +111,17 @@ export function ProductDetailSheet({
     if (contentRef.current) contentRef.current.scrollTop = 0;
   }
 
+  // Every branch below that leaves the sheet open ensures `visible` is
+  // true, not just the "fresh open" one. That's the fix for a real bug:
+  // close this product, then immediately open another (or the same one
+  // again) before the 200ms close animation finishes, and `product` goes
+  // null-then-non-null while `displayedProduct` is still set — landing on
+  // the "swap" branch below. The old code only set `visible` on fresh
+  // opens, so it stayed stuck `false`: the backdrop was invisible but
+  // still mounted and still capturing every tap (nothing behind it was
+  // clickable, and the page couldn't scroll) until a second tap forced a
+  // real close. Fast repeat tapping — which nothing throttles when a
+  // product has no photo to load — made this easy to trigger.
   useEffect(() => {
     if (!product) {
       // Closing: slide the sheet away, but keep rendering the last
@@ -102,20 +135,34 @@ export function ProductDetailSheet({
     }
 
     if (!displayedProduct) {
-      // Fresh open.
+      // TRUE fresh mount — the panel doesn't exist in the DOM yet this
+      // render, so the browser needs to actually paint the "closed"
+      // starting position at least once before we flip to open, or the
+      // transition can get skipped entirely (mount + immediate style
+      // flip coalesced into one paint — the double-frame wait is the
+      // more reliable fix for that; see nextFrame's doc comment).
       showProduct(product);
-      const raf = requestAnimationFrame(() => setVisible(true));
-      return () => cancelAnimationFrame(raf);
+      return nextFrame(() => setVisible(true));
     }
 
-    if (displayedProduct.id !== product.id) {
-      // Swapping to a different product while already open — e.g. tapping
-      // an "Often bought with" card. Fade the old content out, then swap
-      // and fade the new content in, rather than snapping straight over.
-      setContentVisible(false);
-      const t = setTimeout(() => showProduct(product), CROSSFADE_MS);
-      return () => clearTimeout(t);
+    // From here on the panel is already mounted and already painted at
+    // least once — no frame-wait needed, `setVisible(true)` can happen
+    // synchronously and the CSS transition still animates correctly.
+    // This matters: it's what makes reopening (or swapping to a
+    // different product) actually reliable after tapping close and then
+    // immediately tapping something else, before the 200ms close
+    // animation had finished — see the comment above this effect.
+    setVisible(true);
+
+    if (displayedProduct.id === product.id) {
+      showProduct(product);
+      return;
     }
+
+    // Swapping to a different product while already open.
+    setContentVisible(false);
+    const t = setTimeout(() => showProduct(product), CROSSFADE_MS);
+    return () => clearTimeout(t);
   }, [product, displayedProduct]);
 
   useEffect(() => {
@@ -157,6 +204,8 @@ export function ProductDetailSheet({
   function handleClose() {
     onClose();
   }
+
+  const { offset: dragOffset, dragging, handlers: dragHandlers } = useDragToClose("y", handleClose);
 
   function toggleModifier(group: PublicModifierGroup, modifierId: string) {
     setSelections((prev) => {
@@ -209,7 +258,7 @@ export function ProductDetailSheet({
     <div
       className={cn(
         "fixed inset-0 z-40 flex items-end justify-center bg-hg-ink/50 transition-opacity duration-200 sm:items-center sm:p-4",
-        visible ? "opacity-100" : "opacity-0",
+        visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
       )}
       onClick={handleClose}
     >
@@ -218,12 +267,21 @@ export function ProductDetailSheet({
         aria-modal="true"
         aria-label={displayedProduct.name}
         onClick={(e) => e.stopPropagation()}
+        style={dragging ? { transform: `translateY(${dragOffset}px)` } : undefined}
         className={cn(
-          "flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white transition-transform duration-200 sm:max-w-lg sm:rounded-2xl",
-          visible ? "translate-y-0" : "translate-y-full sm:translate-y-4 sm:opacity-0",
+          "flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white sm:max-w-lg sm:rounded-2xl",
+          !dragging && "transition-transform duration-200",
+          !dragging && (visible ? "translate-y-0" : "translate-y-full sm:translate-y-4 sm:opacity-0"),
         )}
       >
-        <div className="relative shrink-0">
+        {/* Drag handle + photo together are the swipe-down-to-close zone —
+            deliberately not the scrollable content below, so a normal
+            scroll through the modifier list never gets mistaken for a
+            close gesture. */}
+        <div className="relative shrink-0" {...dragHandlers}>
+          <div className="flex justify-center pb-1 pt-2">
+            <div className="h-1 w-10 rounded-full bg-hg-brown/20" />
+          </div>
           <div
             className={cn(
               "transition-all duration-150 ease-out",

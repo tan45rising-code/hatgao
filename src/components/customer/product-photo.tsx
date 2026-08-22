@@ -19,7 +19,16 @@ export function ProductPhoto({
   if (src) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- remote Vercel Blob URL, not a local optimizable asset
-      <img src={src} alt={alt} className={cn("object-cover", className)} />
+      <img
+        src={src}
+        alt={alt}
+        draggable={false}
+        // Mobile Safari's long-press-to-save-image menu can eat the start
+        // of a tap on a product photo, making it feel like tapping the
+        // photo just does less than tapping the card's text next to it.
+        style={{ WebkitTouchCallout: "none" }}
+        className={cn("object-cover select-none", className)}
+      />
     );
   }
 

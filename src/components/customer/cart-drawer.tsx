@@ -7,11 +7,13 @@ import { cn } from "@/lib/utils";
 import { useCart } from "@/lib/cart/cart-context";
 import { cartLineTotalCents, cartTotalCents } from "@/lib/cart/types";
 import { getCartRecommendations } from "@/lib/cart/recommendations";
+import { useDragToClose } from "@/lib/use-drag-to-close";
 import type { PublicProduct } from "@/server/menu/public-menu";
 import { QuantityStepper } from "@/components/ui/quantity-stepper";
 import { MostOrderedCard } from "./most-ordered-card";
 import { ProductListSheet } from "./product-list-sheet";
 import { ProductPhoto } from "./product-photo";
+import { SwipeableCartLine } from "./swipeable-cart-line";
 
 /** 2 columns × 4 rows before "Show all" — the full list (up to 20, see
  * recommendations.ts) lives behind that button instead. */
@@ -44,6 +46,11 @@ export function CartDrawer({
     onSelectProduct(product);
   }
 
+  // Slides in from the right, so "closing" is dragging further right —
+  // scoped to the header, not the scrollable cart list (which uses its
+  // own horizontal swipe, per line, for delete — see SwipeableCartLine).
+  const { offset: dragOffset, dragging, handlers: dragHandlers } = useDragToClose("x", closeDrawer);
+
   return (
     <div
       aria-hidden={!isDrawerOpen}
@@ -58,12 +65,17 @@ export function CartDrawer({
         role="dialog"
         aria-modal="true"
         aria-label="Your order"
+        style={dragging ? { transform: `translateX(${dragOffset}px)` } : undefined}
         className={cn(
-          "absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-hg-bg shadow-xl transition-transform duration-200",
-          isDrawerOpen ? "translate-x-0" : "translate-x-full",
+          "absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-hg-bg shadow-xl",
+          !dragging && "transition-transform duration-200",
+          !dragging && (isDrawerOpen ? "translate-x-0" : "translate-x-full"),
         )}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-hg-brown/10 bg-white px-5 py-4">
+        <div
+          className="flex shrink-0 items-center justify-between border-b border-hg-brown/10 bg-white px-5 py-4"
+          {...dragHandlers}
+        >
           <h2 className="font-display text-lg font-semibold text-hg-ink">Your order</h2>
           <button
             type="button"
@@ -85,43 +97,49 @@ export function CartDrawer({
             <div className="flex-1 overflow-y-auto py-4">
               <ul className="space-y-4 px-5">
                 {cart.lines.map((line) => (
-                  <li key={line.lineId} className="flex gap-3 rounded-xl bg-white p-3 shadow-sm">
-                    <ProductPhoto
-                      src={line.imageUrl}
-                      alt={line.name}
-                      className="h-16 w-16 shrink-0 rounded-lg"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="truncate text-sm font-semibold text-hg-ink">{line.name}</p>
-                        <button
-                          type="button"
-                          onClick={() => removeLine(line.lineId)}
-                          aria-label={`Remove ${line.name}`}
-                          className="shrink-0 text-hg-brown/40 hover:text-hg-red"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                      {line.modifiers.length > 0 && (
-                        <p className="mt-0.5 truncate text-xs text-hg-brown/60">
-                          {line.modifiers.map((m) => m.name).join(", ")}
-                        </p>
-                      )}
-                      {line.notes && (
-                        <p className="mt-0.5 truncate text-xs italic text-hg-brown/50">&ldquo;{line.notes}&rdquo;</p>
-                      )}
-                      <div className="mt-2 flex items-center justify-between">
-                        <QuantityStepper
-                          value={line.quantity}
-                          onChange={(q) => updateQuantity(line.lineId, q)}
-                          className="scale-90 origin-left"
+                  <li key={line.lineId}>
+                    <SwipeableCartLine onDelete={() => removeLine(line.lineId)}>
+                      <div className="flex gap-3 rounded-xl bg-white p-3 shadow-sm">
+                        <ProductPhoto
+                          src={line.imageUrl}
+                          alt={line.name}
+                          className="h-16 w-16 shrink-0 rounded-lg"
                         />
-                        <span className="text-sm font-semibold text-hg-ink">
-                          {formatCents(cartLineTotalCents(line))}
-                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="truncate text-sm font-semibold text-hg-ink">{line.name}</p>
+                            <button
+                              type="button"
+                              onClick={() => removeLine(line.lineId)}
+                              aria-label={`Remove ${line.name}`}
+                              className="shrink-0 text-hg-brown/40 hover:text-hg-red"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                          {line.modifiers.length > 0 && (
+                            <p className="mt-0.5 truncate text-xs text-hg-brown/60">
+                              {line.modifiers.map((m) => m.name).join(", ")}
+                            </p>
+                          )}
+                          {line.notes && (
+                            <p className="mt-0.5 truncate text-xs italic text-hg-brown/50">
+                              &ldquo;{line.notes}&rdquo;
+                            </p>
+                          )}
+                          <div className="mt-2 flex items-center justify-between">
+                            <QuantityStepper
+                              value={line.quantity}
+                              onChange={(q) => updateQuantity(line.lineId, q)}
+                              className="scale-90 origin-left"
+                            />
+                            <span className="text-sm font-semibold text-hg-ink">
+                              {formatCents(cartLineTotalCents(line))}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    </SwipeableCartLine>
                   </li>
                 ))}
               </ul>
