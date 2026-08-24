@@ -832,20 +832,20 @@ The rule that keeps this maintainable: **`src/app/` may import from `src/server/
 
 Each phase ends with something that works and is reviewed before the next begins. Time estimates assume you're doing this alongside running a restaurant — adjust freely.
 
-### Phase 0 — Foundations *(before any feature work)*
+### Phase 0 — Foundations *(before any feature work)* — ✅ Done
 Repo, TypeScript, Next.js, Tailwind, Prisma, Postgres running locally, environment config, linting, Git workflow, deploy pipeline to a staging URL.
 **Done when:** a "hello world" page is live on a real staging URL and `prisma migrate` works.
 
-### Phase 1 — Data model & menu management
+### Phase 1 — Data model & menu management — ✅ Done, merged to `main`
 Full Prisma schema. Admin auth. Admin CRUD for categories, products, modifier groups, modifiers, images, availability toggles.
 **Done when:** you can enter the entire HAT GAO menu yourself through the admin UI.
 **Note:** this is where you do real work — getting the menu data right (photos, descriptions, modifiers, prices) is a bigger job than it sounds and it's on the critical path.
 
-### Phase 2 — Customer menu & cart
+### Phase 2 — Customer menu & cart — ✅ Done
 Mobile-first public menu, product detail with modifiers, cart, quantities, notes. **No checkout, no payment.**
 **Done when:** you can build a cart on your phone and it looks good.
 
-### Phase 3 — Pickup orders, end to end
+### Phase 3 — Pickup orders, end to end — 🔜 next up
 Checkout for pickup only. Server-side totals. Stripe Payment Element with manual capture. Stripe webhooks. Order confirmation. Kitchen order board with audible alert, accept/reject, status progression. Opening hours.
 **Done when: you can take a real pickup order from a real customer and get paid.**
 This is the milestone I'd push hard for. Pickup has no Wolt dependency, so it can go live *before* Wolt technical access arrives, and it de-risks the entire payment and kitchen-operations half of the project with real usage.

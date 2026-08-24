@@ -35,15 +35,15 @@ think one is wrong.
 **Phase 0 complete.** Repo → GitHub → Vercel auto-deploy → live URL, with
 a Neon Postgres database. Verified working.
 
-**Phase 1 in progress.** Done so far:
+**Phase 1 complete, merged to `main`** (`ea3d6f4`). The `admin-dashboard`
+branch it was built on is now stale — main has since-fixed bugs that
+branch doesn't, don't build on it, safe to delete.
 - Full Prisma schema (`prisma/schema.prisma`) — menu, orders, payments,
   deliveries, jobs, webhook inbox, promotions, audit log
 - Real Hat Gao menu seeded: 74 products across 12 categories
 - Domain logic in `src/server` and `src/lib`, with 86 passing tests
   (`npm run test:domain`)
-- **Admin dashboard is done**, built as three reviewable slices on the
-  `admin-dashboard` branch (not yet merged to `main` — merge when you're
-  ready to treat it as reviewed):
+- **Admin dashboard**:
   - **Staff auth core** — password login (`argon2id`), roles (`OWNER`/
     `STAFF` with a hierarchy check), 5-attempts/15-minute lockout, full
     audit trail. `npm run staff:create` creates accounts from the CLI —
@@ -52,22 +52,51 @@ a Neon Postgres database. Verified working.
     `src/middleware.ts` redirecting an unenrolled OWNER to
     `/admin/2fa/setup` before anything else. 10 one-time recovery codes
     (argon2id-hashed, never stored plaintext) shown once at enrollment.
-    **Your own OWNER account is not currently enrolled** — I reset it to
-    unenrolled after every test pass. Enroll it for real before relying
-    on this in production.
+    **Confirm with Tan whether his OWNER account is actually enrolled**
+    before relying on this in production — it was deliberately left
+    unenrolled through Phase 1 development and hasn't been touched since,
+    so don't assume either way.
   - **Menu CRUD** — categories, products, modifier groups, all OWNER-only
     (`ROUTE_ROLE_REQUIREMENTS` in `src/middleware.ts`). Product
     availability is a 3-state dropdown (Available / Sold out today /
     Unavailable) — "sold out today" self-heals at next local midnight via
     a lazy sync (`src/server/menu/sync-availability.ts`), no cron needed.
-    Real photo upload to Vercel Blob with `sharp` re-encoding as
-    validation (`src/server/menu/product-image.ts`) — requires
-    `BLOB_READ_WRITE_TOKEN` in `.env` (documented in `.env.example`).
+    The product list orders by menu number when "all categories" is
+    selected, by manual sort order within a single filtered category.
+    Photo upload goes browser → Vercel Blob directly (a client-side
+    upload, not a plain Server Action file post) with the server
+    re-fetching and re-encoding via `sharp` as the real validation —
+    see gotcha 6, this isn't the obvious way to do it and there's a real
+    reason.
 
-**Not done yet:** merging `admin-dashboard` into `main`; enrolling the
-real OWNER account in 2FA; whatever Phase 1 task comes after the admin
-dashboard (check `docs/ARCHITECTURE.md`'s roadmap — likely the customer-
-facing ordering flow and/or the order/payment/delivery state machines).
+**Phase 2 complete — customer menu & cart**
+(`src/app/(customer)`, `src/components/customer`). Mobile-first public
+menu, product detail popup with modifiers/quantity/notes, cart with
+quantity/remove, a "Most Ordered" horizontal-scroll section, "Often
+bought with" / "Recommended for you" cross-sell. **No checkout, no
+payment yet** — that's Phase 3. Went through several rounds of real
+mobile-touch hardening beyond the initial build:
+  - Swipe-to-close (product popup, cart) and swipe-to-delete (cart line)
+    both require real distance (a fraction of screen size, not a fixed
+    px count) OR a genuinely fast flick — see gotcha 8. Swipe-to-delete
+    also gives feedback right at its threshold (trash icon grows, haptic
+    pulse where supported) instead of surprising the user on release.
+  - Cart drawer locks page scroll while open, matching the other two
+    overlays — fixes a pull-to-refresh false-trigger and a footer/
+    scroll-interaction bug that only showed up without it.
+  - Notes textarea is `text-base`, not `text-sm` — see gotcha 7.
+
+**Not done yet — next up is Phase 3: pickup orders, end to end**
+(`docs/ARCHITECTURE.md` section J). Checkout for pickup only, server-side
+totals, Stripe Payment Element with manual capture, Stripe webhooks,
+order confirmation, kitchen order board (audible alert, accept/reject,
+status progression), opening hours. This is the milestone that turns
+this into something that can take a real payment from a real customer —
+see the architecture doc for why it's worth reaching before the Wolt
+integration.
+
+Also still outstanding: confirming/enrolling the real OWNER 2FA account
+(see above) — do this before Phase 3 goes anywhere near real money.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -91,6 +120,49 @@ facing ordering flow and/or the order/payment/delivery state machines).
 5. **Seed SQL must stay idempotent and must not contain BEGIN/COMMIT.**
    psql and Neon's editor supply their own transaction; nesting turns one
    bad statement into a "transaction is aborted" cascade.
+
+6. **Vercel Serverless Functions cap request bodies at ~4.5MB — Next's
+   own `serverActions.bodySizeLimit` config cannot raise it.** That cap
+   is enforced by Vercel's routing layer before a Server Action's code
+   (or Next's config) ever runs, so it's easy to "fix" this in a way that
+   works locally and on small test files and still breaks in production
+   on a real few-MB photo. This bit the product-photo upload twice before
+   the real fix landed: the browser now uploads the raw file directly to
+   Vercel Blob (client-side, via a short-lived token from a small route
+   handler that never sees the bytes), and the Server Action only ever
+   receives the resulting URL — it re-fetches the bytes server-side to
+   validate/re-encode with `sharp`. See `src/server/menu/product-image.ts`
+   and `src/app/admin/(protected)/menu/products/photo-upload/route.ts`.
+   Any future large-upload feature needs the same pattern, not a plain
+   `<input type="file">` inside a form bound to a Server Action.
+
+7. **Mobile browsers zoom the whole page in on focus for any text input
+   under 16px font-size, and zooming back out on blur is the unreliable
+   half** — especially inside a `fixed`-position sheet like the product
+   popup. Don't try to force a zoom-out; just never trigger the zoom-in.
+   Any real text `<input>` or `<textarea>` needs `text-base` (16px)
+   minimum, never `text-sm`.
+
+8. **Touch-gesture thresholds (swipe-to-close, swipe-to-delete) need to
+   be distance-OR-velocity, with distance expressed as a fraction of
+   `window.innerWidth`/`innerHeight`, not a fixed px count.** A fixed-px
+   threshold feels completely different on a small phone vs a tablet, and
+   distance-only (however large) is either too easy for a deliberate fast
+   flick to feel sluggish, or too small for a slow careful drag to feel
+   safe from accidental triggers — it needs both, checked independently.
+   See `src/lib/use-drag-to-close.ts` and
+   `src/components/customer/swipeable-cart-line.tsx` — both recompute
+   their threshold fresh per gesture (touchstart), never once at load.
+
+9. **This environment's Browser-pane `computer` tool can't reliably
+   simulate real touch drags** — mobile-preset clicks/drags there time
+   out inconsistently. That's a tool-level quirk, not an app bug:
+   screenshots and desktop-mode mouse clicks work fine throughout, and
+   there were never any console/server errors alongside the timeouts. To
+   actually verify touch-gesture code, dispatch real `Touch`/`TouchEvent`
+   objects at the target element via `javascript_tool` instead — that
+   exercises the real listeners and real state, not a mock, and is how
+   the swipe-to-delete threshold/feedback logic actually got verified.
 
 ## Non-negotiable business rules
 
@@ -133,7 +205,7 @@ contract breach or a direct financial loss.
 
 ```bash
 npm run dev              # dev server
-npm run test:domain      # 60 domain tests (no packages needed beyond tsx)
+npm run test:domain      # 86 domain tests (no packages needed beyond tsx)
 npm run typecheck:domain # strict tsc over src/lib + src/server
 npx prisma db push       # sync schema to the database
 npm run db:constraints   # ALWAYS run after db push — see gotcha 1
