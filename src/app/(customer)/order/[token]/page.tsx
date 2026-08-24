@@ -4,12 +4,18 @@ import { formatCents } from "@/lib/money";
 import { getSettings } from "@/server/settings/get-settings";
 import { orderStatusCopy } from "@/server/orders/status-copy";
 import type { OrderStatus } from "@/server/orders/state-machine";
+import { OrderStatusLive } from "@/components/customer/order-status-live";
 
 /**
  * Public order status page — no auth. `publicToken` (an unguessable
  * UUID) is the security boundary, not a session, per H.3: never expose a
- * sequential id here, only this token. Static per page load; the
- * customer refreshes to see an updated status (no polling this phase).
+ * sequential id here, only this token. The status line itself is a
+ * client component that polls (`OrderStatusLive`) — a customer landing
+ * here right after paying used to see "Confirming your payment…" and
+ * then nothing would ever update without a manual refresh, even once the
+ * webhook had long since moved the order along. Everything else on this
+ * page (the receipt, the collection details) doesn't change after
+ * checkout, so it stays a plain server-rendered fetch.
  */
 export default async function OrderStatusPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -27,7 +33,11 @@ export default async function OrderStatusPage({ params }: { params: Promise<{ to
   return (
     <div className="mx-auto max-w-lg px-4 py-6">
       <h1 className="mb-1 font-display text-2xl font-semibold text-hg-ink">Order {order.orderNumber}</h1>
-      <p className="mb-6 text-base text-hg-brown">{orderStatusCopy(order.status as OrderStatus)}</p>
+      <OrderStatusLive
+        token={token}
+        initialStatus={order.status as OrderStatus}
+        initialStatusCopy={orderStatusCopy(order.status as OrderStatus)}
+      />
 
       <div className="rounded-xl bg-white p-4 shadow-sm">
         <ul className="space-y-2 text-sm text-hg-ink">

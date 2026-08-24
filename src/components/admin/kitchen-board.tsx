@@ -5,21 +5,29 @@
  * every `PLACED` order has been Accepted or Rejected, and exposes the one
  * contextual action each order card needs.
  *
- * Audio: browsers block `AudioContext` sound from ever starting without a
- * prior user gesture, so nothing plays until "Enable alert sound" is
- * tapped — that tap is what's allowed to create the `AudioContext` at
- * all. This is a real UX step on a kitchen tablet, not an optional extra.
+ * Audio: `public/sounds/kitchen-alert.m4a` (Tan's own alert sound), looped
+ * natively via the `<audio loop>` element rather than a JS interval —
+ * simpler than the earlier synthesized-beep version, which had to
+ * re-trigger itself on a timer since a Web Audio oscillator is a one-shot.
+ *
+ * Browsers block ANY audio element from playing without a prior user
+ * gesture, so nothing plays until "Enable alert sound" is tapped. That
+ * tap does a play()-then-immediately-pause() — the standard trick for
+ * "unlocking" an `<audio>` element: it counts as the required user
+ * gesture, so every *later* programmatic `.play()` call (triggered by a
+ * poll finding a new order, not a click) is allowed to actually produce
+ * sound. Skipping this step is why a naive `audioRef.current.play()`
+ * from inside the polling effect below would silently do nothing on an
+ * iPad that hasn't had the button tapped yet.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { OrderCard } from "@/components/admin/order-card";
-import { playBeep } from "@/lib/kitchen-audio";
 import { acceptOrderAction, advanceOrderStatusAction, pollActiveOrdersAction, rejectOrderAction } from "@/app/admin/(protected)/orders/actions";
 import type { KitchenOrderSummary } from "@/server/orders/list-active";
 import type { OrderStatus } from "@/server/orders/state-machine";
 
 const POLL_INTERVAL_MS = 4500;
-const BEEP_INTERVAL_MS = 2500;
 
 export function KitchenBoard({ initialOrders }: { initialOrders: KitchenOrderSummary[] }) {
   const [orders, setOrders] = useState(initialOrders);
@@ -27,32 +35,37 @@ export function KitchenBoard({ initialOrders }: { initialOrders: KitchenOrderSum
   const [error, setError] = useState<string | null>(null);
   const [soundArmed, setSoundArmed] = useState(false);
 
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const beepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const hasNewOrders = orders.some((o) => o.status === "PLACED");
 
-  const armSound = useCallback(() => {
-    const AudioContextCtor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextCtor) return;
-    audioCtxRef.current = new AudioContextCtor();
-    setSoundArmed(true);
-  }, []);
+  function armSound() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio
+      .play()
+      .then(() => {
+        audio.pause();
+        audio.currentTime = 0;
+      })
+      .catch(() => {
+        // Some browsers still refuse even this — mark armed anyway so the
+        // effect below at least tries; worst case, no sound, same as today.
+      })
+      .finally(() => setSoundArmed(true));
+  }
 
   useEffect(() => {
-    if (!soundArmed || !audioCtxRef.current) return;
+    const audio = audioRef.current;
+    if (!soundArmed || !audio) return;
 
     if (hasNewOrders) {
-      playBeep(audioCtxRef.current);
-      beepTimerRef.current = setInterval(() => {
-        if (audioCtxRef.current) playBeep(audioCtxRef.current);
-      }, BEEP_INTERVAL_MS);
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+      audio.currentTime = 0;
     }
-
-    return () => {
-      if (beepTimerRef.current) clearInterval(beepTimerRef.current);
-      beepTimerRef.current = null;
-    };
   }, [soundArmed, hasNewOrders]);
 
   useEffect(() => {
@@ -92,6 +105,8 @@ export function KitchenBoard({ initialOrders }: { initialOrders: KitchenOrderSum
 
   return (
     <div>
+      <audio ref={audioRef} src="/sounds/kitchen-alert.m4a" loop preload="auto" />
+
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold text-neutral-900">Orders</h1>
         {!soundArmed && (

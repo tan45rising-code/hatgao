@@ -15,6 +15,7 @@ import type Stripe from "stripe";
 import { prisma } from "@/server/db";
 import { assertTransition } from "@/server/orders/state-machine";
 import { recordAuditLog } from "@/server/audit/log";
+import { sendOrderConfirmationEmail } from "@/server/notifications/order-confirmation-email";
 
 async function findPaymentByIntentId(paymentIntentId: string) {
   return prisma.payment.findUnique({
@@ -30,6 +31,15 @@ async function handleAmountCapturableUpdated(pi: Stripe.PaymentIntent) {
   if (payment.status === "AUTHORIZED" && payment.order.status !== "PENDING_PAYMENT") {
     return; // already applied — safe no-op on redelivery
   }
+
+  // Tracks whether THIS call is the one that actually moved the order to
+  // PLACED — as opposed to a safe no-op reprocess where it got there
+  // already. The confirmation email fires only on that genuine
+  // transition, which is also what makes it idempotent for free: any
+  // later redelivery of this event either short-circuits at the early
+  // return above, or (payment already AUTHORIZED, order already PLACED)
+  // never sets this flag, so the email never sends twice.
+  let justPlaced = false;
 
   await prisma.$transaction(async (tx) => {
     if (payment.status !== "AUTHORIZED") {
@@ -67,6 +77,7 @@ async function handleAmountCapturableUpdated(pi: Stripe.PaymentIntent) {
           actorType: "STRIPE",
         },
       });
+      justPlaced = true;
     }
   });
 
@@ -77,6 +88,15 @@ async function handleAmountCapturableUpdated(pi: Stripe.PaymentIntent) {
     entityId: payment.order.id,
     after: { paymentIntentId: pi.id },
   });
+
+  // Outside the transaction and after it's committed — an external email
+  // API call has no place inside a DB transaction (same reasoning as the
+  // Stripe calls in create.ts/accept.ts), and a failure here must never
+  // roll back or retry the payment state change. Best-effort by design;
+  // see the file-level doc comment on sendOrderConfirmationEmail.
+  if (justPlaced) {
+    await sendOrderConfirmationEmail(payment.order.id);
+  }
 }
 
 async function handlePaymentFailed(pi: Stripe.PaymentIntent) {
