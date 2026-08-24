@@ -1,14 +1,20 @@
 /**
- * Order confirmation email, sent once — from `webhook-handler.ts`, right
- * after the Stripe webhook that marks an order `PLACED` (the closest
- * thing this system has to "the order is placed successfully"; PLACED
- * only ever happens via a verified webhook, see state-machine.ts).
+ * Order confirmation email, sent once — from `src/server/orders/accept.ts`,
+ * right after staff Accept an order.
  *
- * Best-effort and non-blocking by design: a failed send must never break
- * the payment webhook it's called from, or cause Stripe to retry an
- * otherwise-successful webhook delivery. Every error is caught here,
- * logged, and audited — never thrown. `customerEmail` is optional at
- * checkout, so this is a no-op when there isn't one.
+ * Deliberately NOT sent at `PLACED` (payment authorized, order just
+ * landed on the kitchen board) — that used to be the trigger, and it was
+ * wrong: a customer who got a "confirmed" email and then had their order
+ * Rejected had no way to know anything had changed. `ACCEPTED` is the
+ * point staff have actually committed to making the food (architecture
+ * doc calls it "the atomic pivot") — the first moment "confirmed" is
+ * actually true. See `order-rejection-email.ts` for the other half of
+ * this: a rejected order now gets its own email instead of silence.
+ *
+ * Best-effort and non-blocking by design: a failed send must never turn
+ * a successful Accept into an error shown to staff. Every error is
+ * caught here, logged, and audited — never thrown. `customerEmail` is
+ * optional at checkout, so this is a no-op when there isn't one.
  */
 
 import { prisma } from "@/server/db";
@@ -16,14 +22,7 @@ import { resend } from "@/server/notifications/resend-client";
 import { getSettings } from "@/server/settings/get-settings";
 import { recordAuditLog } from "@/server/audit/log";
 import { formatCents } from "@/lib/money";
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+import { escapeHtml } from "@/lib/html-escape";
 
 function buildEmailHtml(input: {
   restaurantName: string;
@@ -86,12 +85,11 @@ export async function sendOrderConfirmationEmail(orderId: string): Promise<void>
 
   // Everything below is inside this one try, not just the send call —
   // the whole point of this function is that it NEVER throws (see the
-  // doc comment above). A DB hiccup while building the email is exactly
-  // as recoverable-only-by-logging as a Resend API error: the outer
-  // webhook handler's early-return-on-redelivery guard means a thrown
-  // error here would surface as a retried webhook that skips straight
-  // past this function next time (state already applied) — silently
-  // dropping the email forever instead of just failing loudly once.
+  // doc comment above). accept.ts calls this after the order is already
+  // durably ACCEPTED and captured; a thrown error here would surface to
+  // staff as a failed Accept even though the money's already taken and
+  // the kitchen already has the order — strictly worse than a logged,
+  // silent-to-staff email failure.
   try {
     const settings = await getSettings();
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";

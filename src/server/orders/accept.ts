@@ -12,6 +12,7 @@ import { suggestedPrepMinutes, DEFAULT_PEAK_WINDOWS } from "@/server/menu/availa
 import { getSettings } from "@/server/settings/get-settings";
 import { recordAuditLog } from "@/server/audit/log";
 import { stripe } from "@/server/payments/stripe/client";
+import { sendOrderConfirmationEmail } from "@/server/notifications/order-confirmation-email";
 
 export type AcceptOrderInput = {
   orderId: string;
@@ -151,6 +152,11 @@ export async function acceptOrder(input: AcceptOrderInput): Promise<AcceptOrderR
     entityId: order.id,
     after: { promisedPrepMinutes: prepMinutes },
   });
+
+  // After everything above has durably landed — the confirmation email
+  // is a side effect of a successful Accept, not a precondition for one.
+  // Best-effort/never-throws by design, see the file's own doc comment.
+  await sendOrderConfirmationEmail(order.id);
 
   return { ok: true };
 }

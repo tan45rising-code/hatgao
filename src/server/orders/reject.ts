@@ -8,6 +8,7 @@ import { prisma } from "@/server/db";
 import { assertTransition } from "@/server/orders/state-machine";
 import { recordAuditLog } from "@/server/audit/log";
 import { stripe } from "@/server/payments/stripe/client";
+import { sendOrderRejectionEmail } from "@/server/notifications/order-rejection-email";
 
 export type RejectOrderInput = {
   orderId: string;
@@ -94,6 +95,11 @@ export async function rejectOrder(input: RejectOrderInput): Promise<RejectOrderR
     entityId: order.id,
     after: { reason: input.reason },
   });
+
+  // Best-effort/never-throws by design — a customer who paid deserves to
+  // know their order didn't go ahead, but a failed send must not turn a
+  // successful Reject (payment already released) into an error for staff.
+  await sendOrderRejectionEmail(order.id);
 
   return { ok: true };
 }
