@@ -96,7 +96,7 @@ export function CartDrawer({
         style={dragging ? { transform: `translateY(${dragOffset}px)` } : undefined}
         className={cn(
           "absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-hg-bg shadow-xl",
-          (settling || !dragging) && "transition-transform duration-300 ease-out",
+          (settling || !dragging) && "transition-transform duration-500 ease-out",
           !dragging && (isDrawerOpen ? "translate-x-0" : "translate-x-full"),
         )}
       >

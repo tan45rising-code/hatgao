@@ -4,23 +4,30 @@ import { useCallback, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/** A slow, deliberate swipe only deletes once it's gone this far left. */
-const DELETE_DISTANCE_THRESHOLD_PX = 120;
+/** A slow, deliberate swipe only deletes once it's gone this far left —
+ * half the screen width, not a fixed pixel count, so it means the same
+ * thing on a small phone and a large one. Same reasoning as
+ * use-drag-to-close.ts's DISTANCE_THRESHOLD_FRACTION, which this mirrors;
+ * read fresh in onTouchEnd rather than cached, so it tracks orientation
+ * changes for free. */
+const DELETE_DISTANCE_FRACTION = 0.5;
 /** A fast flick deletes with much less distance than that — but still
  * needs to have moved at least this far first, so a stray touchmove right
  * at touchstart (near-zero distance, so noisy velocity math) can never
  * read as a fling. Same reasoning as use-drag-to-close.ts, which this
  * mirrors. */
-const MIN_FLING_DISTANCE_PX = 24;
-/** px/ms, leftward. ~500px/s — comfortably past a slow drag, comfortably
- * under a real flick. */
-const FLING_VELOCITY_PX_PER_MS = 0.5;
+const MIN_FLING_DISTANCE_PX = 32;
+/** px/ms, leftward. ~800px/s — a real, deliberate flick, not just a
+ * brisk swipe (500px/s turned out to be common enough in an ordinary
+ * swipe that it was undermining the whole point of raising the distance
+ * threshold above). */
+const FLING_VELOCITY_PX_PER_MS = 0.8;
 const OFFSCREEN_PX = 400;
-/** Fires a little before the "duration-300" slide-away transition below
+/** Fires a little before the "duration-500" slide-away transition below
  * actually finishes — the row is already essentially off-screen by then,
  * and waiting the full duration just makes the actual removal feel laggy
  * rather than adding anything visible. */
-const REMOVE_ANIMATION_MS = 260;
+const REMOVE_ANIMATION_MS = 430;
 
 /**
  * Swipe-left-to-delete for a cart line — the same list still keeps its
@@ -33,8 +40,8 @@ const REMOVE_ANIMATION_MS = 260;
  *
  * Deleting on release is distance-OR-velocity, not distance alone — same
  * reasoning as use-drag-to-close.ts's `finish()`: a slow drag has to go a
- * genuine `DELETE_DISTANCE_THRESHOLD_PX` deep, but a fast flick closes off
- * a much shorter distance, measured as real px/ms sampled continuously
+ * genuine `DELETE_DISTANCE_FRACTION` of the screen deep, but a fast flick
+ * closes off a much shorter distance, measured as real px/ms sampled continuously
  * during the drag rather than derived from start/end alone. Without the
  * velocity half, the threshold alone was easy to cross by accident on any
  * moderately deliberate swipe; without the distance floor, a single noisy
@@ -138,9 +145,10 @@ export function SwipeableCartLine({
 
     function onTouchEnd() {
       const distance = -dragXRef.current; // positive px moved left
+      const deleteThreshold = window.innerWidth * DELETE_DISTANCE_FRACTION;
       const deleting =
         axis.current === "x" &&
-        (distance > DELETE_DISTANCE_THRESHOLD_PX ||
+        (distance > deleteThreshold ||
           (distance > MIN_FLING_DISTANCE_PX && velocityRef.current > FLING_VELOCITY_PX_PER_MS));
       if (deleting) {
         setDragX(-OFFSCREEN_PX);
@@ -173,7 +181,7 @@ export function SwipeableCartLine({
       <div
         ref={rowRef}
         style={{ transform: `translateX(${dragX}px)` }}
-        className={cn(!dragging && "transition-transform duration-300 ease-out")}
+        className={cn(!dragging && "transition-transform duration-500 ease-out")}
       >
         {children}
       </div>

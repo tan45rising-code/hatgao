@@ -61,12 +61,12 @@ function nextFrame(cb: () => void): () => void {
 }
 
 const CROSSFADE_MS = 150;
-// Matches the panel's own "duration-300" transform transition below, and
+// Matches the panel's own "duration-500" transform transition below, and
 // use-drag-to-close.ts's SETTLE_MS — all three have to agree, or a close
 // either unmounts the content mid-slide (too short) or leaves the panel
 // sitting fully off-screen for a beat before finally disappearing (too
 // long, reads as unresponsive rather than smooth).
-const CLOSE_MS = 300;
+const CLOSE_MS = 500;
 
 export function ProductDetailSheet({
   product,
@@ -281,7 +281,7 @@ export function ProductDetailSheet({
         style={dragging ? { transform: `translateY(${dragOffset}px)` } : undefined}
         className={cn(
           "flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white sm:max-w-lg sm:rounded-2xl",
-          (settling || !dragging) && "transition-transform duration-300 ease-out",
+          (settling || !dragging) && "transition-transform duration-500 ease-out",
           !dragging && (visible ? "translate-y-0" : "translate-y-full sm:translate-y-4 sm:opacity-0"),
         )}
       >
@@ -404,7 +404,14 @@ export function ProductDetailSheet({
               rows={2}
               placeholder="e.g. no coriander, extra spicy"
               maxLength={200}
-              className="w-full rounded-lg border border-hg-brown/20 px-3 py-2 text-sm text-hg-ink placeholder:text-hg-brown/40 focus:border-hg-red focus:outline-none"
+              // text-base (16px), not text-sm — below 16px, iOS/Android
+              // zoom the whole page in on focus to make the text legible,
+              // and zooming back out on blur is the unreliable half of
+              // that behavior (especially inside a fixed-position sheet
+              // like this one) — the standard fix is to never trigger the
+              // zoom in the first place rather than try to force it back
+              // out after the fact.
+              className="w-full rounded-lg border border-hg-brown/20 px-3 py-2 text-base text-hg-ink placeholder:text-hg-brown/40 focus:border-hg-red focus:outline-none"
             />
           </div>
 

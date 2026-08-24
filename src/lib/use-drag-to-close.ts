@@ -3,18 +3,24 @@
 import { useCallback, useRef, useState } from "react";
 
 const OFFSCREEN_PX = 1200; // comfortably past any real viewport dimension
-const SETTLE_MS = 300; // matches the CSS sheets/drawer normally close on — see the "duration-300" classes alongside every `settling || !dragging` check
+const SETTLE_MS = 500; // matches the CSS sheets/drawer normally close on — see the "duration-500" classes alongside every `settling || !dragging` check
 
-/** A slow, deliberate drag only closes once it's gone this deep. */
-const DEFAULT_DISTANCE_THRESHOLD_PX = 120;
+/** A slow, deliberate drag only closes once it's gone this deep — half
+ * the screen, not a fixed pixel count, so it means the same thing on a
+ * small phone and a large one. Computed fresh per render (a plain
+ * `window.innerHeight`/`innerWidth` read, not a layout-forcing one) so it
+ * tracks orientation changes without needing its own effect/listener. */
+const DISTANCE_THRESHOLD_FRACTION = 0.5;
 /** A fast flick closes with much less distance than that — but still
  * needs to have moved at least this far, so a stray touchmove firing
  * right at touchstart (near-zero distance, so noisy velocity math) can
  * never read as a fling. */
-const MIN_FLING_DISTANCE_PX = 24;
-/** px/ms in the closing direction. ~500px/s — comfortably past anything
- * a slow, deliberate drag produces, comfortably under a real flick. */
-const FLING_VELOCITY_PX_PER_MS = 0.5;
+const MIN_FLING_DISTANCE_PX = 32;
+/** px/ms in the closing direction. ~800px/s — a real, deliberate flick,
+ * not just a brisk drag (500px/s turned out to be common enough in an
+ * ordinary swipe that it was undermining the whole point of raising the
+ * distance threshold above). */
+const FLING_VELOCITY_PX_PER_MS = 0.8;
 
 /**
  * Swipe-to-dismiss for a sheet/drawer, usable from two kinds of zones:
@@ -86,7 +92,16 @@ const FLING_VELOCITY_PX_PER_MS = 0.5;
  * potentially one event stale. The ref is always current. Same reasoning
  * covers the velocity ref.
  */
-export function useDragToClose(axis: "x" | "y", onClose: () => void, threshold = DEFAULT_DISTANCE_THRESHOLD_PX) {
+export function useDragToClose(axis: "x" | "y", onClose: () => void, thresholdOverride?: number) {
+  // Half the screen, not a fixed pixel count — see DISTANCE_THRESHOLD_FRACTION.
+  // `thresholdOverride` exists for a caller that genuinely wants a fixed
+  // px value instead; nothing currently does.
+  const threshold =
+    thresholdOverride ??
+    (typeof window === "undefined"
+      ? 400
+      : (axis === "y" ? window.innerHeight : window.innerWidth) * DISTANCE_THRESHOLD_FRACTION);
+
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [settling, setSettling] = useState(false);
