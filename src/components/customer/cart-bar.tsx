@@ -1,6 +1,5 @@
 "use client";
 
-import { ShoppingBag } from "lucide-react";
 import { formatCents } from "@/lib/money";
 import { useCart } from "@/lib/cart/cart-context";
 import { cartItemCount, cartTotalCents } from "@/lib/cart/types";
@@ -19,8 +18,10 @@ export function CartBar() {
         className="mx-auto flex w-full max-w-lg items-center justify-between rounded-full bg-hg-red px-5 py-3.5 text-white shadow-lg transition-transform hover:scale-[1.01] active:scale-[0.99]"
       >
         <span className="flex items-center gap-2 text-sm font-semibold">
-          <ShoppingBag className="h-4 w-4" />
-          {count} item{count === 1 ? "" : "s"} · View order
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-hg-red">
+            {count}
+          </span>
+          View order
         </span>
         <span className="text-sm font-semibold">{formatCents(cartTotalCents(cart))}</span>
       </button>
