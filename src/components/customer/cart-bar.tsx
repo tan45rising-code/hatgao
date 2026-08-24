@@ -20,7 +20,7 @@ export function CartBar() {
       >
         <span className="flex items-center gap-2 text-sm font-semibold">
           <ShoppingBag className="h-4 w-4" />
-          {count} item{count === 1 ? "" : "s"}
+          {count} item{count === 1 ? "" : "s"} · View order
         </span>
         <span className="text-sm font-semibold">{formatCents(cartTotalCents(cart))}</span>
       </button>

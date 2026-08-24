@@ -219,6 +219,13 @@ export function CartDrawer({
               >
                 Checkout
               </Link>
+              <button
+                type="button"
+                onClick={closeDrawer}
+                className="mt-2 w-full rounded-full border border-hg-brown/20 bg-white px-5 py-2.5 text-sm font-semibold text-hg-ink transition-colors hover:bg-hg-bg"
+              >
+                Continue browsing
+              </button>
             </div>
           </>
         )}
