@@ -115,7 +115,7 @@ export async function sendOrderConfirmationEmail(orderId: string): Promise<void>
       totalCents: order.totalCents,
     });
 
-    const fromAddress = process.env.EMAIL_FROM ?? "orders@hatgao.com.cy";
+    const fromAddress = process.env.EMAIL_FROM ?? "orders@hatgaocy.com";
     const result = await resend.emails.send({
       from: `${settings.restaurantName} <${fromAddress}>`,
       to: order.customerEmail,
