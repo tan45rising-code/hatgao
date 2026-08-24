@@ -5,12 +5,12 @@ import { Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /** A slow, deliberate swipe only deletes once it's gone this far left —
- * half the screen width, not a fixed pixel count, so it means the same
- * thing on a small phone and a large one. Same reasoning as
+ * a third of the screen width, not a fixed pixel count, so it means the
+ * same thing on a small phone and a large one. Same reasoning as
  * use-drag-to-close.ts's DISTANCE_THRESHOLD_FRACTION, which this mirrors;
- * read fresh in onTouchEnd rather than cached, so it tracks orientation
- * changes for free. */
-const DELETE_DISTANCE_FRACTION = 0.5;
+ * read fresh at the start of each gesture rather than cached once for the
+ * component's lifetime, so it tracks orientation changes for free. */
+const DELETE_DISTANCE_FRACTION = 1 / 3;
 /** A fast flick deletes with much less distance than that — but still
  * needs to have moved at least this far first, so a stray touchmove right
  * at touchstart (near-zero distance, so noisy velocity math) can never
@@ -28,6 +28,10 @@ const OFFSCREEN_PX = 400;
  * and waiting the full duration just makes the actual removal feel laggy
  * rather than adding anything visible. */
 const REMOVE_ANIMATION_MS = 430;
+/** A short, single haptic pulse — long enough to notice, short enough not
+ * to read as an error buzz. iOS Safari has no Vibration API at all (never
+ * implemented it, PWA or not) and silently no-ops; Android Chrome does. */
+const DELETE_ARMED_VIBRATION_MS = 15;
 
 /**
  * Swipe-left-to-delete for a cart line — the same list still keeps its
@@ -53,6 +57,16 @@ const REMOVE_ANIMATION_MS = 430;
  * passive by default, which silently makes preventDefault() inside them
  * a no-op. Same reasoning as use-drag-to-close.ts, which this component
  * predates but should have matched from the start.
+ *
+ * The trash icon underneath grows the moment the drag crosses the delete
+ * threshold, plus one short haptic pulse right at that crossing — a third
+ * of the screen is far enough that without some "you've gone far enough,
+ * letting go now deletes this" signal along the way, release is the only
+ * place the user finds out what's about to happen. Both are driven by
+ * `willDelete`, not read directly off `dragX`, so they fire exactly once
+ * per crossing in either direction rather than re-triggering (the
+ * vibration especially — a buzz on every touchmove past the line would
+ * read as a malfunction, not feedback) — see `armedRef` below.
  */
 export function SwipeableCartLine({
   onDelete,
@@ -63,12 +77,28 @@ export function SwipeableCartLine({
 }) {
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
+  // Whether the drag has crossed the delete threshold right now — drives
+  // the trash icon's grow effect. Deliberately its own state (not derived
+  // from `dragX` at render time) so the vibration can piggyback on the
+  // exact same "just crossed" moment via `armedRef`, below.
+  const [willDelete, setWillDelete] = useState(false);
   const start = useRef<{ x: number; y: number } | null>(null);
   const axis = useRef<"x" | "y" | null>(null);
   // Always-current mirror of dragX for the threshold check on release —
   // see the matching comment in use-drag-to-close.ts for why the state
   // value alone can be one event stale under React's render batching.
   const dragXRef = useRef(0);
+  // The delete threshold, in px, for the CURRENT gesture — window.innerWidth
+  // read once at touchstart rather than on every touchmove. Cheap either
+  // way, but pinning it per-gesture is the more correct read: nothing
+  // should change mid-drag just because the viewport resized.
+  const deleteThresholdRef = useRef(0);
+  // True once haptic feedback has fired for the current threshold
+  // crossing — without this, every touchmove past the line would vibrate
+  // again, which reads as a malfunction, not feedback. Flips back false
+  // the moment the drag retreats back under the threshold, so crossing
+  // again (forward or back) re-arms it.
+  const armedRef = useRef(false);
   // px/ms, positive = moving left (toward delete) — sampled on every
   // touchmove once the gesture's claimed as horizontal. Same reasoning as
   // use-drag-to-close.ts's velocityRef.
@@ -84,6 +114,8 @@ export function SwipeableCartLine({
     dragXRef.current = 0;
     setDragX(0);
     setDragging(false);
+    setWillDelete(false);
+    armedRef.current = false;
     start.current = null;
     axis.current = null;
     resetVelocity();
@@ -105,6 +137,8 @@ export function SwipeableCartLine({
       const t = e.touches[0]!;
       start.current = { x: t.clientX, y: t.clientY };
       axis.current = null;
+      deleteThresholdRef.current = window.innerWidth * DELETE_DISTANCE_FRACTION;
+      armedRef.current = false;
       resetVelocity();
       setDragging(true);
     }
@@ -141,14 +175,25 @@ export function SwipeableCartLine({
       const next = Math.min(0, dx); // left only
       dragXRef.current = next;
       setDragX(next);
+
+      // Crossing the delete threshold, in either direction, is the "just
+      // crossed" moment the doc comment above talks about — armedRef
+      // makes sure the vibration (and the setWillDelete call) only fires
+      // once per crossing, not on every touchmove past the line.
+      const distance = -next;
+      const past = distance > deleteThresholdRef.current;
+      if (past !== armedRef.current) {
+        armedRef.current = past;
+        setWillDelete(past);
+        if (past && "vibrate" in navigator) navigator.vibrate(DELETE_ARMED_VIBRATION_MS);
+      }
     }
 
     function onTouchEnd() {
       const distance = -dragXRef.current; // positive px moved left
-      const deleteThreshold = window.innerWidth * DELETE_DISTANCE_FRACTION;
       const deleting =
         axis.current === "x" &&
-        (distance > deleteThreshold ||
+        (distance > deleteThresholdRef.current ||
           (distance > MIN_FLING_DISTANCE_PX && velocityRef.current > FLING_VELOCITY_PX_PER_MS));
       if (deleting) {
         setDragX(-OFFSCREEN_PX);
@@ -176,7 +221,12 @@ export function SwipeableCartLine({
   return (
     <div className="relative overflow-hidden rounded-xl">
       <div className="absolute inset-0 flex items-center justify-end bg-hg-red px-5">
-        <Trash2 className="h-5 w-5 text-white" />
+        <Trash2
+          className={cn(
+            "h-5 w-5 text-white transition-transform duration-150 ease-out",
+            willDelete && "scale-150",
+          )}
+        />
       </div>
       <div
         ref={rowRef}
