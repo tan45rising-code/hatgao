@@ -30,6 +30,7 @@ import {
   priceOrder,
   type PricingContext,
   type PricedProduct,
+  type PricingResult,
 } from "../../src/server/pricing/order-total.ts";
 
 import {
@@ -55,10 +56,12 @@ import {
   suggestedPrepMinutes,
   toLocalMoment,
   nextLocalMidnightUtc,
+  formatMinutes,
   DEFAULT_PEAK_WINDOWS,
   type AvailabilityConfig,
   type OpeningHoursRow,
   type DayOfWeek,
+  type ServiceAvailability,
 } from "../../src/server/menu/availability.ts";
 
 import {
@@ -82,6 +85,11 @@ import {
 } from "../../src/server/auth/recovery-codes.ts";
 
 import { slugify } from "../../src/lib/slug.ts";
+
+import { checkoutGate } from "../../src/server/orders/checkout-gate.ts";
+import { randomOrderNumber } from "../../src/server/orders/order-number.ts";
+import { orderStatusCopy } from "../../src/server/orders/status-copy.ts";
+import { parseHHMM } from "../../src/lib/time.ts";
 
 // ---------------------------------------------------------------- harness --
 let passed = 0;
@@ -940,6 +948,126 @@ test("never produces leading or trailing dashes", () => {
 
 test("an already-clean slug round-trips unchanged", () => {
   assert.equal(slugify("beef-pho"), "beef-pho");
+});
+
+// --------------------------------------------------------- checkout gate --
+section("Checkout availability gate");
+
+const OPEN_AVAILABILITY: ServiceAvailability = {
+  isOpen: true,
+  acceptingOrders: true,
+  deliveryAvailable: true,
+  pickupAvailable: true,
+};
+
+const CLOSED_TODAY_AVAILABILITY: ServiceAvailability = {
+  isOpen: false,
+  acceptingOrders: false,
+  deliveryAvailable: false,
+  pickupAvailable: false,
+  reason: "CLOSED_TODAY",
+};
+
+const OK_PRICING: PricingResult = {
+  ok: true,
+  lines: [],
+  subtotalCents: 1000,
+  discountCents: 0,
+  vatTotalCents: 50,
+  foodTotalCents: 1000,
+  freeDeliveryFromDiscount: false,
+};
+
+const FAILED_PRICING: PricingResult = {
+  ok: false,
+  errors: [{ code: "BELOW_MINIMUM_ORDER", message: "Minimum order for pickup is €15.00." }],
+};
+
+test("open, pickup enabled, valid pricing passes", () => {
+  const result = checkoutGate(OPEN_AVAILABILITY, true, OK_PRICING);
+  assert.equal(result.ok, true);
+});
+
+test("closed today refuses with a closed-specific message", () => {
+  const result = checkoutGate(CLOSED_TODAY_AVAILABILITY, true, OK_PRICING);
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.reason, "We're closed today.");
+});
+
+test("pickup disabled refuses even when open and priced fine", () => {
+  const result = checkoutGate(OPEN_AVAILABILITY, false, OK_PRICING);
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.reason, "Collection isn't available right now.");
+});
+
+test("a pricing error surfaces once availability and pickup are both fine", () => {
+  const result = checkoutGate(OPEN_AVAILABILITY, true, FAILED_PRICING);
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.reason, "Minimum order for pickup is €15.00.");
+});
+
+test("availability is checked before pricing", () => {
+  const result = checkoutGate(CLOSED_TODAY_AVAILABILITY, true, FAILED_PRICING);
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.reason, "We're closed today.");
+});
+
+// ---------------------------------------------------------- order number --
+section("Order number generation");
+
+test("matches the HG-#### shape", () => {
+  for (let i = 0; i < 20; i++) {
+    assert.match(randomOrderNumber(), /^HG-\d{4}$/);
+  }
+});
+
+test("has reasonable spread across many calls (sanity check, not a collision proof)", () => {
+  const seen = new Set(Array.from({ length: 50 }, () => randomOrderNumber()));
+  assert.ok(seen.size > 1, "expected some variety across 50 generated order numbers");
+});
+
+// ---------------------------------------------------------- status copy --
+section("Order status copy");
+
+const ALL_ORDER_STATUSES: OrderStatus[] = [
+  "DRAFT",
+  "PENDING_PAYMENT",
+  "PLACED",
+  "ACCEPTED",
+  "PREPARING",
+  "READY",
+  "OUT_FOR_DELIVERY",
+  "AWAITING_PICKUP",
+  "COMPLETED",
+  "REJECTED",
+  "CANCELLED",
+  "ABANDONED",
+  "FAILED",
+];
+
+for (const status of ALL_ORDER_STATUSES) {
+  test(`${status} has non-empty copy`, () => {
+    assert.ok(orderStatusCopy(status).length > 0);
+  });
+}
+
+test("PENDING_PAYMENT reads as reassuring, not an error", () => {
+  assert.match(orderStatusCopy("PENDING_PAYMENT"), /confirming/i);
+});
+
+// ------------------------------------------------------------- HH:MM ------
+section("parseHHMM / formatMinutes round-trip");
+
+test("round-trips ordinary times", () => {
+  for (const minutes of [0, 30, 720, 1350, 1439]) {
+    assert.equal(parseHHMM(formatMinutes(minutes)), minutes);
+  }
+});
+
+test("rejects malformed input", () => {
+  assert.throws(() => parseHHMM("not-a-time"));
+  assert.throws(() => parseHHMM("25:00"));
+  assert.throws(() => parseHHMM("12:60"));
 });
 
 // ------------------------------------------------------------------ report --

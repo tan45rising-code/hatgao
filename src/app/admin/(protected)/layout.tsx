@@ -43,7 +43,7 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
           </form>
         </div>
       </header>
-      {session.user.role === "OWNER" && <AdminNav />}
+      <AdminNav role={session.user.role} />
       <main className="p-6">{children}</main>
     </div>
   );

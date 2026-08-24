@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { ShoppingBag, Trash2, X } from "lucide-react";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -211,16 +212,13 @@ export function CartDrawer({
                 <span className="text-hg-brown/70">Estimated total</span>
                 <span className="text-base font-semibold text-hg-ink">{formatCents(total)}</span>
               </div>
-              <p className="mb-3 rounded-md bg-hg-gold/15 px-3 py-2 text-center text-xs text-hg-brown">
-                Checkout is on its way — you&apos;ll be able to pay and place this order soon.
-              </p>
-              <button
-                type="button"
+              <Link
+                href="/checkout"
                 onClick={closeDrawer}
-                className="w-full rounded-full border border-hg-brown/20 bg-white px-5 py-2.5 text-sm font-semibold text-hg-ink transition-colors hover:bg-hg-bg"
+                className="block w-full rounded-full bg-hg-red px-5 py-3 text-center text-sm font-semibold text-white transition-colors hover:bg-hg-red/90"
               >
-                Continue browsing
-              </button>
+                Checkout
+              </Link>
             </div>
           </>
         )}

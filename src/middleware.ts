@@ -39,6 +39,12 @@ const TWO_FACTOR_SETUP_PATH = "/admin/2fa/setup";
 /** Longest matching prefix wins, so a more specific route can override a broader one. */
 const ROUTE_ROLE_REQUIREMENTS: Record<string, StaffRole> = {
   "/admin/menu": "OWNER",
+  // Opening hours and service settings control whether the site takes
+  // money at all — OWNER territory (H.3), not a kitchen tablet login.
+  // "/admin/orders" (the kitchen board) intentionally has no entry here
+  // and falls through to the default STAFF requirement below.
+  "/admin/hours": "OWNER",
+  "/admin/settings": "OWNER",
 };
 
 function requiredRoleFor(pathname: string): StaffRole {

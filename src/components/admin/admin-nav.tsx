@@ -1,31 +1,42 @@
 "use client";
 
 /**
- * The Categories / Products / Modifier groups nav. A client component
- * because highlighting "which page am I on" needs the current pathname —
- * `usePathname()` is client-only. Everything else in the admin stays
- * server-rendered; this is one small, self-contained exception.
+ * Admin nav. A client component because highlighting "which page am I
+ * on" needs the current pathname — `usePathname()` is client-only.
+ * Everything else in the admin stays server-rendered; this is one small,
+ * self-contained exception.
+ *
+ * Takes `role` so STAFF (a kitchen-tablet login) sees just "Orders" —
+ * everything else here is OWNER territory (menu, hours, settings — H.3:
+ * "OWNER: menu, pricing, promotions, settings, analytics, refunds").
  */
 
+import type { StaffRole } from "@prisma/client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-const LINKS = [
+const STAFF_LINKS = [{ href: "/admin/orders", label: "Orders" }];
+
+const OWNER_LINKS = [
+  ...STAFF_LINKS,
   { href: "/admin/menu", label: "Categories" },
   { href: "/admin/menu/products", label: "Products" },
   { href: "/admin/menu/modifier-groups", label: "Modifier groups" },
+  { href: "/admin/hours", label: "Hours" },
+  { href: "/admin/settings", label: "Settings" },
 ];
 
-export function AdminNav() {
+export function AdminNav({ role }: { role: StaffRole }) {
   const pathname = usePathname();
+  const links = role === "OWNER" ? OWNER_LINKS : STAFF_LINKS;
 
   return (
     <nav className="flex gap-2 border-b border-neutral-200 bg-white px-6 py-3">
-      {LINKS.map(({ href, label }) => {
+      {links.map(({ href, label }) => {
         // "/admin/menu" is also a prefix of "/admin/menu/products", so it
-        // needs an exact match; the other two are fine matching anything
-        // nested under them (the product/group edit pages, etc.).
+        // needs an exact match; the rest are fine matching anything
+        // nested under them (edit pages, etc.).
         const active = href === "/admin/menu" ? pathname === href : pathname.startsWith(href);
         return (
           <Link

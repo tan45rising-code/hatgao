@@ -86,17 +86,38 @@ mobile-touch hardening beyond the initial build:
     scroll-interaction bug that only showed up without it.
   - Notes textarea is `text-base`, not `text-sm` — see gotcha 7.
 
-**Not done yet — next up is Phase 3: pickup orders, end to end**
-(`docs/ARCHITECTURE.md` section J). Checkout for pickup only, server-side
-totals, Stripe Payment Element with manual capture, Stripe webhooks,
-order confirmation, kitchen order board (audible alert, accept/reject,
-status progression), opening hours. This is the milestone that turns
-this into something that can take a real payment from a real customer —
-see the architecture doc for why it's worth reaching before the Wolt
-integration.
+**Phase 3 built, not yet live** — pickup checkout, Stripe payment
+(manual capture), Stripe webhooks, order confirmation, kitchen order
+board, opening-hours admin. Confirmed OWNER 2FA enrollment (already
+done, per Tan). All new code is typechecked/linted/built clean, and
+verified as far as possible without real Stripe credentials: the full
+order-creation → availability-gate → DB-transaction → compensating-
+failure path was exercised end to end against the real Neon database
+(a checkout attempt with no `STRIPE_SECRET_KEY` correctly creates the
+order, fails at PaymentIntent creation, and marks `Order`/`Payment`
+`FAILED` rather than leaving anything half-done); the kitchen board's
+accept/reject/status-progression flow and the STAFF/OWNER nav+middleware
+split were verified the same way, including the money-safety guarantee
+that a failed Stripe capture leaves the order at `PLACED`, never
+silently `ACCEPTED`. What's **not yet verified** because it needs real
+credentials: an actual card payment completing through Stripe Elements,
+and a real Stripe webhook delivery (signature verification, the
+`amount_capturable_updated` → `PLACED` transition, capture, void).
 
-Also still outstanding: confirming/enrolling the real OWNER 2FA account
-(see above) — do this before Phase 3 goes anywhere near real money.
+Still outstanding before this can take a real customer's payment:
+- **Tan**: create a Stripe account, get **test-mode** keys
+  (`STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`), install
+  the Stripe CLI, run `stripe listen --forward-to
+  localhost:3000/api/webhooks/stripe` for local webhook testing (see
+  `STRIPE_WEBHOOK_SECRET` in `.env.example`), then walk a full test order
+  end to end (test card `4242 4242 4242 4242`).
+- **Tan**: set real opening hours via the new `/admin/hours` page (OWNER
+  only) and review `/admin/settings` (pickup minimum, prep times) — both
+  currently hold placeholder/test values from development, not real
+  numbers.
+- Order confirmation is on-screen only (no email — `RESEND_API_KEY`
+  isn't configured; deferred by agreement with Tan, not an oversight).
+- Delivery/Wolt remains entirely out of scope — Phase 4.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -163,6 +184,21 @@ Also still outstanding: confirming/enrolling the real OWNER 2FA account
    objects at the target element via `javascript_tool` instead — that
    exercises the real listeners and real state, not a mock, and is how
    the swipe-to-delete threshold/feedback logic actually got verified.
+
+10. **Never construct a third-party SDK client (Stripe, etc.) at module
+    scope with a possibly-missing API key.** `next build`'s "Collecting
+    page data" step imports every route module — including
+    `src/app/api/webhooks/stripe/route.ts` — to statically analyze it,
+    which runs that module's top-level code even though nothing is
+    actually handling a request. The Stripe SDK's constructor throws
+    immediately on an empty/missing key, so a plain `export const stripe
+    = new Stripe(process.env.STRIPE_SECRET_KEY ?? "")` crashes the build
+    outright in any environment that hasn't configured Stripe yet
+    (including local dev before Tan adds test keys). Fix: construct
+    lazily — see `src/server/payments/stripe/client.ts`, which wraps a
+    memoized constructor in a `Proxy` so the real `new Stripe(...)` only
+    happens on first property access, which only ever occurs inside an
+    actual request handler.
 
 ## Non-negotiable business rules
 
