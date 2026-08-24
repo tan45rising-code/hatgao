@@ -53,8 +53,8 @@ The important discipline is *internal* separation: all business logic lives in a
 We do **not** touch WordPress. It keeps doing what it does — marketing pages, story, photos, contact, SEO.
 
 ```
-hatgao.com.cy          → WordPress (unchanged)
-order.hatgao.com.cy    → the new ordering app (Next.js on Vercel)
+hatgaocy.com           → WordPress (unchanged)
+order.hatgaocy.com     → the new ordering app (Next.js on Vercel)
 ```
 
 The WordPress site gets a prominent "Order Online" button pointing at the subdomain. This is exactly how GloriaFood works today, so it is not a downgrade in customer experience, and it means a WordPress plugin update can never take down your ordering system.
@@ -117,8 +117,8 @@ This is a few hundred lines of code, has no new vendor, survives restarts, and i
 
 ```
 ┌──────────────────┐        ┌────────────────────────────────────┐
-│  hatgao.com.cy   │        │        CUSTOMER (mobile web)       │
-│   WordPress      │──────► │     order.hatgao.com.cy            │
+│  hatgaocy.com    │        │        CUSTOMER (mobile web)       │
+│   WordPress      │──────► │     order.hatgaocy.com             │
 │  (marketing)     │  link  │     Next.js customer app           │
 └──────────────────┘        └───────────────┬────────────────────┘
                                             │ HTTPS (session cookie)
@@ -153,14 +153,14 @@ This is a few hundred lines of code, has no new vendor, survives restarts, and i
                          │                    ▼
                      ┌───┴────────────────────────────┐
                      │  KITCHEN TABLET                │
-                     │  order.hatgao.com.cy/admin     │
+                     │  order.hatgaocy.com/admin      │
                      │  polls every 5s · audio alert  │
                      └────────────────────────────────┘
 ```
 
 ### B.2 The happy path, step by step
 
-1. **Browse.** Customer opens `order.hatgao.com.cy` on their phone. Menu is served from our database, cached at the edge.
+1. **Browse.** Customer opens `order.hatgaocy.com` on their phone. Menu is served from our database, cached at the edge.
 2. **Cart.** Items and modifiers held in browser state (and mirrored to a server-side cart row once they start checkout, so we can recover abandoned carts later).
 3. **Address & availability.** Customer enters a delivery address. We geocode it, then call Wolt's **`POST /v1/venues/{venue_id}/shipment-promises`** with the dropoff location. Wolt returns a `price`, an `eta_minutes`, a promise `id` and a `valid_until` timestamp. We store the raw response.
 4. **Fee calculation.** Our own **delivery pricing rules** (Section B.4) turn Wolt's cost into the fee the *customer* actually sees. These are different numbers and the system must always know both.
@@ -909,7 +909,7 @@ Loyalty/rewards, scheduled orders, push notifications, review requests, marketin
 
 ### K.3 Blocking — technical access
 
-18. **Domain and DNS access** for `hatgao.com.cy` (to create the `order.` subdomain)
+18. **Domain and DNS access** for `hatgaocy.com` (to create the `order.` subdomain)
 19. **WordPress admin access** (to add the Order Online button)
 20. Legal entity details for the **Stripe account**: company name, registration number, VAT number, bank account, director ID for KYC
 21. Whether you already have a **Google Cloud / Mapbox account** for geocoding, or want me to recommend one
