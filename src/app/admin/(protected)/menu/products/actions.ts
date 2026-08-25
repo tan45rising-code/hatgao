@@ -49,9 +49,30 @@ const productSchema = z.object({
   sortOrder: z.coerce.number().int().default(0),
 });
 
-async function requireOwner() {
+/** Session-existence check only, no role check — matches the idiom
+ * elsewhere in the admin (role gating left to middleware.ts). Fine here
+ * ONLY because the one caller left using this, updateAvailabilityStatusAction,
+ * is exactly the action STAFF are meant to be able to use. */
+async function requireStaffSession() {
   const session = await auth();
   if (!session) redirect("/admin/login");
+  return session;
+}
+
+/**
+ * A real OWNER check, not just session existence — needed because
+ * middleware.ts now lets STAFF reach `/admin/menu/products` itself (to
+ * view the list and change availability status). createProductAction,
+ * updateProductAction and deleteProductAction all post to that SAME
+ * page URL, so middleware's page-level gate doesn't distinguish which
+ * Server Action a request is actually invoking — without this, a STAFF
+ * session could forge a POST straight at one of these actions even with
+ * no Edit/Delete button ever rendered for them.
+ */
+async function requireOwnerRole() {
+  const session = await auth();
+  if (!session) redirect("/admin/login");
+  if (session.user.role !== "OWNER") redirect("/admin/menu/products");
   return session;
 }
 
@@ -120,7 +141,7 @@ async function extractUploadedImageUrl(
 }
 
 export async function createProductAction(formData: FormData): Promise<void> {
-  const session = await requireOwner();
+  const session = await requireOwnerRole();
   const parsed = productSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) redirect("/admin/menu/products/new?error=invalid");
 
@@ -174,7 +195,7 @@ export async function createProductAction(formData: FormData): Promise<void> {
  * category-filtered view returns to that same filter instead of always
  * landing back on "all categories". */
 export async function updateProductAction(id: string, category: string | null, formData: FormData): Promise<void> {
-  const session = await requireOwner();
+  const session = await requireOwnerRole();
   const before = await prisma.product.findUnique({ where: { id } });
   if (!before) redirect(productsListPath(category));
 
@@ -245,7 +266,7 @@ export async function updateProductAction(id: string, category: string | null, f
  * product from a filtered view redirects back to that same filter instead
  * of silently dropping it back to "all categories". */
 export async function deleteProductAction(id: string, category: string | null): Promise<void> {
-  const session = await requireOwner();
+  const session = await requireOwnerRole();
   const product = await prisma.product.update({
     where: { id },
     data: { deletedAt: new Date(), isActive: false, isAvailable: false },
@@ -285,7 +306,7 @@ const AVAILABILITY_AUDIT_ACTION: Record<AvailabilityStatus, string> = {
  *     happens without a background job.
  */
 export async function updateAvailabilityStatusAction(id: string, formData: FormData): Promise<void> {
-  const session = await requireOwner();
+  const session = await requireStaffSession();
   const status = formData.get("status");
   if (status !== "available" && status !== "unavailable" && status !== "sold_out_today") {
     redirect("/admin/menu/products");

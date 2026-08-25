@@ -6,9 +6,12 @@
  * Everything else in the admin stays server-rendered; this is one small,
  * self-contained exception.
  *
- * Takes `role` so STAFF (a kitchen-tablet login) sees just "Orders" —
- * everything else here is OWNER territory (menu, hours, settings — H.3:
- * "OWNER: menu, pricing, promotions, settings, analytics, refunds").
+ * Takes `role` so STAFF (a kitchen-tablet login) sees "Orders" and
+ * "Products" — the one menu section they're allowed into (view + change
+ * availability status only, see menu/products/actions.ts's
+ * requireOwnerRole()) — while everything else here stays OWNER territory
+ * (categories, modifier groups, hours, settings — H.3: "OWNER: menu,
+ * pricing, promotions, settings, analytics, refunds").
  */
 
 import type { StaffRole } from "@prisma/client";
@@ -16,10 +19,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-const STAFF_LINKS = [{ href: "/admin/orders", label: "Orders" }];
+const STAFF_LINKS = [
+  { href: "/admin/orders", label: "Orders" },
+  { href: "/admin/menu/products", label: "Products" },
+];
 
 const OWNER_LINKS = [
-  ...STAFF_LINKS,
+  { href: "/admin/orders", label: "Orders" },
   { href: "/admin/menu", label: "Categories" },
   { href: "/admin/menu/products", label: "Products" },
   { href: "/admin/menu/modifier-groups", label: "Modifier groups" },

@@ -39,6 +39,19 @@ const TWO_FACTOR_SETUP_PATH = "/admin/2fa/setup";
 /** Longest matching prefix wins, so a more specific route can override a broader one. */
 const ROUTE_ROLE_REQUIREMENTS: Record<string, StaffRole> = {
   "/admin/menu": "OWNER",
+  // STAFF can view the products list and change availability status
+  // (Available / Sold out today / Unavailable) — nothing else on the
+  // menu. The trailing-slash entry below is deliberately MORE specific
+  // (one character longer) so it wins for everything actually nested
+  // under /admin/menu/products/ — "new", an [id] edit page, photo-upload
+  // — while the bare list page itself (no trailing slash) matches only
+  // the STAFF entry. Editing and deleting stay OWNER-only either way:
+  // this only controls which PAGE loads, not which Server Action a
+  // request is allowed to invoke — see requireOwnerRole() in
+  // menu/products/actions.ts for the actual enforcement, since a Server
+  // Action posts to the list page's own URL and isn't distinguished here.
+  "/admin/menu/products": "STAFF",
+  "/admin/menu/products/": "OWNER",
   // Opening hours and service settings control whether the site takes
   // money at all — OWNER territory (H.3), not a kitchen tablet login.
   // "/admin/orders" (the kitchen board) intentionally has no entry here

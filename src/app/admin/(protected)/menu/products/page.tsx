@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { auth } from "@/auth";
 import { prisma } from "@/server/db";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +21,14 @@ export default async function ProductsPage({
   searchParams: Promise<{ category?: string; confirm?: string }>;
 }) {
   const { category, confirm } = await searchParams;
+
+  // STAFF can reach this page (middleware.ts) to view products and change
+  // availability status — everything else here (create, edit, delete) is
+  // OWNER-only, enforced for real in actions.ts's requireOwnerRole(); this
+  // is just the UI following suit so STAFF never see a button that would
+  // redirect them straight back here anyway.
+  const session = await auth();
+  const isOwner = session?.user.role === "OWNER";
 
   // Self-healing: anything marked "sold out for today" whose reset time has
   // passed comes back automatically, checked right before we list them —
@@ -45,9 +54,11 @@ export default async function ProductsPage({
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-lg font-semibold text-neutral-900">Products</h1>
-        <Link href="/admin/menu/products/new" className={buttonVariants({})}>
-          New product
-        </Link>
+        {isOwner && (
+          <Link href="/admin/menu/products/new" className={buttonVariants({})}>
+            New product
+          </Link>
+        )}
       </div>
 
       <div className="mb-4">
@@ -111,7 +122,7 @@ export default async function ProductsPage({
                 </form>
               </TableCell>
               <TableCell>
-                {confirm === product.id ? (
+                {!isOwner ? null : confirm === product.id ? (
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-medium text-neutral-700">Delete?</span>
                     <form action={deleteProductAction.bind(null, product.id, category ?? null)}>
