@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { prisma } from "@/server/db";
 import { formatCents } from "@/lib/money";
@@ -5,6 +6,7 @@ import { getSettings } from "@/server/settings/get-settings";
 import { orderStatusCopy } from "@/server/orders/status-copy";
 import type { OrderStatus } from "@/server/orders/state-machine";
 import { OrderStatusLive } from "@/components/customer/order-status-live";
+import { ClearCartOnPaymentSuccess } from "@/components/customer/clear-cart-on-payment-success";
 
 /**
  * Public order status page — no auth. `publicToken` (an unguessable
@@ -32,6 +34,9 @@ export default async function OrderStatusPage({ params }: { params: Promise<{ to
 
   return (
     <div className="mx-auto max-w-lg px-4 py-6">
+      <Suspense fallback={null}>
+        <ClearCartOnPaymentSuccess />
+      </Suspense>
       <h1 className="mb-1 font-display text-2xl font-semibold text-hg-ink">Order {order.orderNumber}</h1>
       <OrderStatusLive
         token={token}

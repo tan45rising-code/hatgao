@@ -9,6 +9,7 @@
 
 import { z } from "zod";
 import { createPickupOrder } from "@/server/orders/create";
+import { abandonOrder } from "@/server/orders/abandon";
 import { loadPricingContext } from "@/server/pricing/load-context";
 import { priceOrder, type CartLineInput } from "@/server/pricing/order-total";
 
@@ -56,6 +57,22 @@ export async function startCheckoutAction(input: {
     customerEmail: customer.data.customerEmail || undefined,
     notes: customer.data.notes || undefined,
   });
+}
+
+export type AbandonCheckoutResult = { ok: true; alreadyPlaced: boolean };
+
+/** "Edit details" from the payment step — see abandon.ts for why this is
+ * more than just resetting local component state: an Order + PaymentIntent
+ * already exist by this point, and this properly cancels/marks that one
+ * abandoned instead of leaving it orphaned every time someone uses this. */
+export async function abandonCheckoutAction(publicToken: string): Promise<AbandonCheckoutResult> {
+  const result = await abandonOrder(publicToken);
+  // Not surfaced as an error even on abandonOrder's own { ok: false } —
+  // whatever went wrong server-side, the customer's intent ("let me
+  // change something") is still safely satisfiable by just resetting the
+  // wizard to Step 1 and starting a fresh order on next submit.
+  const alreadyPlaced = result.ok && result.status !== "ABANDONED";
+  return { ok: true, alreadyPlaced };
 }
 
 export type PreviewResult =
