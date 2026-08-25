@@ -21,7 +21,8 @@
     "test:domain": "tsx tests/unit/domain.test.ts",
     "typecheck:domain": "tsc --noEmit -p tsconfig.domain.json",
     "db:constraints": "psql \"$DIRECT_URL\" -v ON_ERROR_STOP=1 -f prisma/verify/004_constraints.sql",
-    "staff:create": "tsx scripts/create-staff-user.ts"
+    "staff:create": "tsx scripts/create-staff-user.ts",
+    "staff:reset-password": "tsx scripts/reset-staff-password.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.7.0",

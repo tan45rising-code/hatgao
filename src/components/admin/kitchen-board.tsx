@@ -19,6 +19,22 @@
  * sound. Skipping this step is why a naive `audioRef.current.play()`
  * from inside the polling effect below would silently do nothing on an
  * iPad that hasn't had the button tapped yet.
+ *
+ * Persisting "armed" (`SOUND_ARMED_STORAGE_KEY`): this component remounts
+ * — losing all its state, including `soundArmed` — every time staff
+ * navigate to a different admin page and back, e.g. tapping "Categories"
+ * then "Orders" again. Without this, that meant re-tapping "Enable alert
+ * sound" after every single navigation, which is exactly the complaint.
+ * The fix leans on a real browser behavior rather than faking one:
+ * client-side navigation (React Router / Next's `<Link>`) never reloads
+ * the document, so the browser's own "has this page had a user gesture
+ * yet" flag survives the remount even though React state doesn't — a
+ * fresh, silent play()-then-pause() on mount succeeds without asking
+ * again. Only a genuine full page reload (hard refresh, new login)
+ * actually clears that flag, and in that case the silent attempt below
+ * rejects and the button correctly reappears — there's no way around a
+ * real browser security restriction, so this doesn't try to fake past
+ * that case, only past the "just clicking around inside the app" one.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -28,6 +44,7 @@ import type { KitchenOrderSummary } from "@/server/orders/list-active";
 import type { OrderStatus } from "@/server/orders/state-machine";
 
 const POLL_INTERVAL_MS = 4500;
+const SOUND_ARMED_STORAGE_KEY = "hatgao-kitchen-sound-armed";
 
 export function KitchenBoard({ initialOrders }: { initialOrders: KitchenOrderSummary[] }) {
   const [orders, setOrders] = useState(initialOrders);
@@ -52,8 +69,33 @@ export function KitchenBoard({ initialOrders }: { initialOrders: KitchenOrderSum
         // Some browsers still refuse even this — mark armed anyway so the
         // effect below at least tries; worst case, no sound, same as today.
       })
-      .finally(() => setSoundArmed(true));
+      .finally(() => {
+        setSoundArmed(true);
+        localStorage.setItem(SOUND_ARMED_STORAGE_KEY, "true");
+      });
   }
+
+  // Auto-re-arm on mount if this browser was armed before — see the
+  // file-level doc comment for why this is allowed to work silently
+  // rather than being a fake shortcut.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || localStorage.getItem(SOUND_ARMED_STORAGE_KEY) !== "true") return;
+
+    audio
+      .play()
+      .then(() => {
+        audio.pause();
+        audio.currentTime = 0;
+        setSoundArmed(true);
+      })
+      .catch(() => {
+        // A real page reload since it was last armed — the browser's
+        // gesture flag is genuinely gone. Clear the stale flag so this
+        // doesn't keep silently failing on every future mount too.
+        localStorage.removeItem(SOUND_ARMED_STORAGE_KEY);
+      });
+  }, []);
 
   useEffect(() => {
     const audio = audioRef.current;
