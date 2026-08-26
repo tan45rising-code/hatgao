@@ -25,6 +25,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { stripe } from "@/server/payments/stripe/client";
 import { processStripeWebhookEvent } from "@/server/payments/webhook-handler";
+import { logger, err as errInfo } from "@/server/logging/logger";
 
 export const runtime = "nodejs";
 
@@ -39,8 +40,8 @@ export async function POST(req: Request) {
   let event: Stripe.Event;
   try {
     event = stripe.webhooks.constructEvent(rawBody, signature, process.env.STRIPE_WEBHOOK_SECRET ?? "");
-  } catch (err) {
-    console.error("Stripe webhook signature verification failed", err);
+  } catch (caught) {
+    logger.error("Stripe webhook signature verification failed", { error: errInfo(caught) });
     return NextResponse.json({ error: "Invalid signature." }, { status: 400 });
   }
 
@@ -82,13 +83,17 @@ export async function POST(req: Request) {
       where: { id: webhookEventId },
       data: { status: "PROCESSED", processedAt: new Date(), attempts: { increment: 1 } },
     });
-  } catch (err) {
-    console.error("Stripe webhook processing failed", event.type, event.id, err);
+  } catch (caught) {
+    logger.error("Stripe webhook processing failed", {
+      eventType: event.type,
+      eventId: event.id,
+      error: errInfo(caught),
+    });
     await prisma.webhookEvent.update({
       where: { id: webhookEventId },
       data: {
         status: "FAILED",
-        error: err instanceof Error ? err.message : String(err),
+        error: caught instanceof Error ? caught.message : String(caught),
         attempts: { increment: 1 },
       },
     });

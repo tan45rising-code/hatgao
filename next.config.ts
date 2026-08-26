@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   // Keep this file boring on purpose. Add config only when a real
@@ -21,4 +22,22 @@ const nextConfig: NextConfig = {
   // src/server/menu/product-image.ts for the full explanation.
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+
+  // Quiet by default: without org/project/authToken configured (true
+  // until Tan creates a Sentry account), the plugin has nothing to
+  // upload to and would otherwise print a warning on every build.
+  silent: true,
+
+  // Strips Sentry's own debug logging out of the client bundle.
+  disableLogger: true,
+
+  // The plugin generates source maps so it can upload them, which would
+  // otherwise leave them sitting in the build output (and potentially
+  // served to users) even when there's no auth token yet to upload them
+  // anywhere. Delete them once the plugin's done either way.
+  sourcemaps: { deleteSourcemapsAfterUpload: true },
+});

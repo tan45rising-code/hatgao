@@ -12,9 +12,15 @@
  * this: a rejected order now gets its own email instead of silence.
  *
  * Best-effort and non-blocking by design: a failed send must never turn
- * a successful Accept into an error shown to staff. Every error is
- * caught here, logged, and audited — never thrown. `customerEmail` is
- * optional at checkout, so this is a no-op when there isn't one.
+ * a successful Accept into an error shown to staff. `sendOrderConfirmationEmail`
+ * catches everything, logs and audits it — never throws — and hands the
+ * failure to the job queue for a few retries with backoff (see
+ * `src/server/jobs`) instead of just giving up after one attempt.
+ * `sendOrderConfirmationEmailOrThrow` is the throwing version the job
+ * worker actually retries; it does the real work and is the only thing
+ * that changed when the retry path was added — the accept.ts call site
+ * and its never-throws contract are untouched. `customerEmail` is
+ * optional at checkout, so both are a no-op when there isn't one.
  */
 
 import { prisma } from "@/server/db";
@@ -23,6 +29,8 @@ import { getSettings } from "@/server/settings/get-settings";
 import { recordAuditLog } from "@/server/audit/log";
 import { formatCents } from "@/lib/money";
 import { escapeHtml } from "@/lib/html-escape";
+import { enqueueJob } from "@/server/jobs/enqueue";
+import { logger, err } from "@/server/logging/logger";
 
 function buildEmailHtml(input: {
   restaurantName: string;
@@ -75,7 +83,13 @@ function buildEmailHtml(input: {
   </div>`;
 }
 
-export async function sendOrderConfirmationEmail(orderId: string): Promise<void> {
+/**
+ * Does the real work; throws on any failure instead of swallowing it.
+ * Exported only for `src/server/jobs/handlers.ts`, which needs a real
+ * exception to know a retry attempt failed — every other call site
+ * should use `sendOrderConfirmationEmail` below instead.
+ */
+export async function sendOrderConfirmationEmailOrThrow(orderId: string): Promise<void> {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     include: { items: { include: { modifiers: true } } },
@@ -83,6 +97,50 @@ export async function sendOrderConfirmationEmail(orderId: string): Promise<void>
 
   if (!order || !order.customerEmail) return;
 
+  const settings = await getSettings();
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const statusUrl = `${appUrl}/order/${order.publicToken}`;
+
+  const html = buildEmailHtml({
+    restaurantName: settings.restaurantName,
+    addressLine: settings.addressLine,
+    city: settings.city,
+    phone: settings.phone,
+    orderNumber: order.orderNumber,
+    statusUrl,
+    items: order.items.map((item) => ({
+      nameSnapshot: item.nameSnapshot,
+      quantity: item.quantity,
+      lineTotalCents: item.lineTotalCents,
+      modifierNames: item.modifiers.map((m) => m.nameSnapshot),
+    })),
+    subtotalCents: order.subtotalCents,
+    discountCents: order.discountCents,
+    totalCents: order.totalCents,
+  });
+
+  const fromAddress = process.env.EMAIL_FROM ?? "orders@hatgaocy.com";
+  const result = await resend.emails.send({
+    from: `${settings.restaurantName} <${fromAddress}>`,
+    to: order.customerEmail,
+    subject: `Order ${order.orderNumber} confirmed — ${settings.restaurantName}`,
+    html,
+  });
+
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+
+  await recordAuditLog({
+    actorType: "SYSTEM",
+    action: "ORDER_CONFIRMATION_EMAIL_SENT",
+    entityType: "Order",
+    entityId: order.id,
+    after: { to: order.customerEmail, resendId: result.data?.id },
+  });
+}
+
+export async function sendOrderConfirmationEmail(orderId: string): Promise<void> {
   // Everything below is inside this one try, not just the send call —
   // the whole point of this function is that it NEVER throws (see the
   // doc comment above). accept.ts calls this after the order is already
@@ -91,59 +149,21 @@ export async function sendOrderConfirmationEmail(orderId: string): Promise<void>
   // the kitchen already has the order — strictly worse than a logged,
   // silent-to-staff email failure.
   try {
-    const settings = await getSettings();
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    const statusUrl = `${appUrl}/order/${order.publicToken}`;
-
-    const html = buildEmailHtml({
-      restaurantName: settings.restaurantName,
-      addressLine: settings.addressLine,
-      city: settings.city,
-      phone: settings.phone,
-      orderNumber: order.orderNumber,
-      statusUrl,
-      items: order.items.map((item) => ({
-        nameSnapshot: item.nameSnapshot,
-        quantity: item.quantity,
-        lineTotalCents: item.lineTotalCents,
-        modifierNames: item.modifiers.map((m) => m.nameSnapshot),
-      })),
-      subtotalCents: order.subtotalCents,
-      discountCents: order.discountCents,
-      totalCents: order.totalCents,
-    });
-
-    const fromAddress = process.env.EMAIL_FROM ?? "orders@hatgaocy.com";
-    const result = await resend.emails.send({
-      from: `${settings.restaurantName} <${fromAddress}>`,
-      to: order.customerEmail,
-      subject: `Order ${order.orderNumber} confirmed — ${settings.restaurantName}`,
-      html,
-    });
-
-    if (result.error) {
-      throw new Error(result.error.message);
-    }
-
-    await recordAuditLog({
-      actorType: "SYSTEM",
-      action: "ORDER_CONFIRMATION_EMAIL_SENT",
-      entityType: "Order",
-      entityId: order.id,
-      after: { to: order.customerEmail, resendId: result.data?.id },
-    });
-  } catch (err) {
+    await sendOrderConfirmationEmailOrThrow(orderId);
+  } catch (caught) {
     // Never throw out of here — see the file-level doc comment. This is
     // the one place a failure is allowed to be silent to the customer
     // (they still have the on-screen confirmation page); it's not silent
-    // to us, it's audited.
-    console.error("Order confirmation email failed", order.orderNumber, err);
+    // to us, it's audited, and it's handed to the job queue for a few
+    // retries with backoff instead of just being given up on.
+    logger.error("Order confirmation email failed", { orderId, error: err(caught) });
     await recordAuditLog({
       actorType: "SYSTEM",
       action: "ORDER_CONFIRMATION_EMAIL_FAILED",
       entityType: "Order",
-      entityId: order.id,
-      after: { error: err instanceof Error ? err.message : String(err) },
+      entityId: orderId,
+      after: { error: caught instanceof Error ? caught.message : String(caught) },
     });
+    await enqueueJob("SEND_ORDER_CONFIRMATION_EMAIL", { orderId });
   }
 }

@@ -90,6 +90,7 @@ import { checkoutGate } from "../../src/server/orders/checkout-gate.ts";
 import { randomOrderNumber } from "../../src/server/orders/order-number.ts";
 import { orderStatusCopy } from "../../src/server/orders/status-copy.ts";
 import { parseHHMM } from "../../src/lib/time.ts";
+import { nextRunAfter } from "../../src/server/jobs/backoff.ts";
 
 // ---------------------------------------------------------------- harness --
 let passed = 0;
@@ -1068,6 +1069,23 @@ test("rejects malformed input", () => {
   assert.throws(() => parseHHMM("not-a-time"));
   assert.throws(() => parseHHMM("25:00"));
   assert.throws(() => parseHHMM("12:60"));
+});
+
+// -------------------------------------------------------- job queue backoff --
+section("Job queue retry backoff");
+
+test("backoff increases with each attempt", () => {
+  const now = new Date("2026-01-01T12:00:00.000Z");
+  assert.equal(nextRunAfter(1, 5, now)?.toISOString(), "2026-01-01T12:01:00.000Z");
+  assert.equal(nextRunAfter(2, 5, now)?.toISOString(), "2026-01-01T12:05:00.000Z");
+  assert.equal(nextRunAfter(3, 5, now)?.toISOString(), "2026-01-01T12:15:00.000Z");
+  assert.equal(nextRunAfter(4, 5, now)?.toISOString(), "2026-01-01T13:00:00.000Z");
+});
+
+test("returns null once attempts reach maxAttempts — caller marks the job DEAD", () => {
+  const now = new Date();
+  assert.equal(nextRunAfter(5, 5, now), null);
+  assert.equal(nextRunAfter(6, 5, now), null); // never called with attempts > maxAttempts, but must not retry forever if it were
 });
 
 // ------------------------------------------------------------------ report --
