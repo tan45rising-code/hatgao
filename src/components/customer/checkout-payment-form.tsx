@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 
@@ -48,6 +49,20 @@ export function CheckoutPaymentForm({ publicToken }: { publicToken: string }) {
         </p>
       )}
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
+      <p className="text-center text-xs text-hg-brown/60">
+        {/* target="_blank": this sits inside the payment step, and Stripe
+            Elements loses its mounted state if the customer navigates away
+            and back — opening in a new tab keeps their card details typed. */}
+        By paying, you agree to our{" "}
+        <Link className="underline" href="/terms" target="_blank">
+          Terms
+        </Link>{" "}
+        and{" "}
+        <Link className="underline" href="/privacy" target="_blank">
+          Privacy Policy
+        </Link>
+        .
+      </p>
       <button
         type="submit"
         disabled={!stripe || submitting || !!loadError}

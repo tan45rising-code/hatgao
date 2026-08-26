@@ -3,6 +3,7 @@ import { CartProvider } from "@/lib/cart/cart-context";
 import { CartBar } from "@/components/customer/cart-bar";
 import { CartToast } from "@/components/customer/cart-toast";
 import { SiteHeader } from "@/components/customer/site-header";
+import { SiteFooter } from "@/components/customer/site-footer";
 
 // Scoped to this route group, not the root layout — the admin dashboard
 // keeps its own plain system-font look (src/app/admin), so this shouldn't
@@ -34,6 +35,7 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
       <CartProvider>
         <SiteHeader />
         {children}
+        <SiteFooter />
         <CartBar />
         <CartToast />
         {/* CartDrawer now renders from MenuBrowser — it needs the full
